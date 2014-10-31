@@ -1,3 +1,4 @@
+
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
@@ -88,11 +89,16 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+                                        /** thread's current priority which */
+                                        /** may be derived from donation    */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    int priority_old;                   /** thread original priority,     */
+					/** restored after releasing lock */
+    struct list all_locks;              /** List of locks hold by this thread */
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -137,5 +143,23 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/* Define a list_less_func which return true if a < b, else false.
+ */
+bool less_priority (const struct list_elem *a,
+		   const struct list_elem *b,
+		   void *aux);
+/* Declare a function type to get the thread priority of a list element
+ */
+typedef int (*get_priority_func) (const struct list_elem *a);
+
+/* get the thread priority in a semaphore wait list */
+int sema_waiter_priority (const struct list_elem *a);
+
+/* get the thread priority in a condition wait list */
+int cond_waiter_priority (const struct list_elem *a);
+
+/* get the max donate priority in a thread's lock list */
+// int lock_donate_priority (const struct list_elem *a);
 
 #endif /* threads/thread.h */

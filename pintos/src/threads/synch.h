@@ -24,11 +24,25 @@ struct lock
     struct semaphore semaphore; /* Binary semaphore controlling access. */
   };
 
+/* One lock in a list. */
+struct lock_elem 
+  {
+    struct list_elem elem;              /* List element. */
+    struct lock      *lock;             /* This lock. */
+  };
+
 void lock_init (struct lock *);
 void lock_acquire (struct lock *);
 bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
+
+/* One semaphore in a list. */
+struct semaphore_elem 
+  {
+    struct list_elem elem;              /* List element. */
+    struct semaphore semaphore;         /* This semaphore. */
+  };
 
 /* Condition variable. */
 struct condition 
