@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -92,6 +93,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&lock_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -343,6 +345,32 @@ thread_foreach (thread_action_func *func, void *aux)
       func (t, aux);
     }
 }
+void
+reset_donate_priority (void)
+{
+  struct list_elem *allelem;     /** element in kernel lock_list */  
+  struct lock *this_lock;
+  struct list_elem *max;
+  struct thread    *t;
+
+  /** For donate priority, check every lock in kernel lock_list. Update the
+      lock holder's priority to be the max priority of the waiting threads.
+  */
+  allelem = list_head(&lock_list);
+  while ((allelem = list_next(allelem)) != list_end(&lock_list)) {
+    this_lock = list_entry(allelem, struct lock, allelem);
+    max = list_max(&this_lock->semaphore.waiters, less_priority,
+		   sema_waiter_priority);
+    t = list_entry(max, struct thread, elem);
+    /** reset the holder's priority to the max. donate priority of
+	waiting threads if donate priority is higher.
+    */
+    if (t->priority > this_lock->holder->priority) {
+      this_lock->holder->priority = t->priority;
+      reset_donate_priority ();
+    }
+  }
+}
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 /**If the current thread no longer has the highest priority, yields.
@@ -350,36 +378,13 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  struct list_elem *max;
+
   thread_current()->priority = new_priority;
   thread_current()->priority_old = new_priority;
 
-  struct list_elem *elem;
-  struct lock_elem *lock_elem;
-  struct list_elem *max;
-  struct thread    *t;
-  int    donate_priority = 0;
-  int    max_donate_priority = 0;
-
-  /** Find the max donation priority of the waiting threads for every lock.
-   */
-  for (elem = list_begin (&thread_current()->all_locks);
-       elem != list_end (&thread_current()->all_locks);
-       elem = list_next (elem)) {
-    lock_elem = list_entry(elem, struct lock_elem, elem);
-    max = list_max(&lock_elem->lock->semaphore, less_priority,
-		   sema_waiter_priority);
-    t = list_entry(max, struct thread, elem);
-    if (t->priority > donate_priority)
-      donate_priority = t->priority;
-    if (donate_priority > max_donate_priority)
-      max_donate_priority = donate_priority;
-  }
-
-  /** reset the holder's priority to the max. donate priority if donate
-      priority is higher.
-   */
-  if (max_donate_priority > new_priority)
-    thread_current()->priority = max_donate_priority;
+  /** Recalculate the donate priority for each lock holder */
+  reset_donate_priority ();
 
   /** Find the thread with max priority in ready queue. If it higher than 
       current thread, yield.
@@ -514,6 +519,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->priority_old = priority;
   t->magic = THREAD_MAGIC;
   /** Initial lock list */
   list_init (&t->all_locks);

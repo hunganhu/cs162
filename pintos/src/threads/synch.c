@@ -32,6 +32,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/malloc.h"     /** for function malloc() and free() */
+struct list lock_list;          /** a list of all locks acquired in a system  */
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -190,14 +191,9 @@ void
 lock_init (struct lock *lock)
 {
   ASSERT (lock != NULL);
-  //  struct lock_elem *this_lock = 
-  //  (struct lock_elem *) malloc (sizeof (struct lock_elem));
 
   lock->holder = NULL;
   sema_init (&lock->semaphore, 1);
-  //  this_lock->lock = lock;
-  //list_push_back (&thread_current()->all_locks, &this_lock->elem);
-
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
@@ -215,8 +211,31 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  struct list_elem *allelem;     /** element in kernel lock_list */  
+  struct lock *this_lock;
+  struct list_elem *max;
+  struct thread    *t;
+  //  int    max_donate_priority = 0;
+
+  /** For the lock is with initial state, add it to kernel lock_list */
+  if (lock->holder == NULL && list_empty(&lock->semaphore.waiters) 
+      && lock->semaphore.value == 1)
+    list_push_back (&lock_list, &lock->allelem);
+
+  if (lock->holder != NULL) {
+    /** For donate priority, donate my priority to lock holder if higher */
+    if (thread_current()->priority > lock->holder->priority)
+      lock->holder->priority = thread_current()->priority;  
+
+    reset_donate_priority ();
+  }
+
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  /** Now the lock can be hold by me. */
+  /** Track locks hold by a thread, append it to the thread's lock list */
+  list_push_back (&thread_current()->all_locks, &lock->elem);
+
+  lock->holder = thread_current();
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -252,58 +271,49 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-  /*
+
   struct list_elem *elem;
-  struct lock_elem *lock_elem;
+  struct lock *lock_elem;
   struct list_elem *max;
   struct thread    *t;
-  int    donate_priority = 0;
   int    max_donate_priority = 0;
-  */
-  /** Find the max donation priority of the waiting threads for every lock.
+
+  /** First remove the lock from thread's lock list.   */
+  elem = list_head(&thread_current()->all_locks);
+  while((elem = list_next(elem)) != list_end(&thread_current()->all_locks)) {
+    lock_elem = list_entry (elem, struct lock, elem);
+    if (lock_elem == lock) {
+      list_remove (elem);
+      break;
+    }
+  }
+
+  /** Find the max donation priority of the waiting threads for other locks.
    */
-  /*
-  for (elem = list_begin (&thread_current()->all_locks);
-       elem != list_end (&thread_current()->all_locks);
-       elem = list_next (elem)) {
-    lock_elem = list_entry(elem, struct lock_elem, elem);
-    max = list_max(&lock_elem->lock->semaphore, less_priority,
+  elem = list_head(&thread_current()->all_locks);
+  while((elem = list_next(elem)) != list_end(&thread_current()->all_locks)) {
+    lock_elem = list_entry(elem, struct lock, elem);
+    max = list_max(&lock_elem->semaphore.waiters, less_priority,
 		   sema_waiter_priority);
     t = list_entry(max, struct thread, elem);
-    if (t->priority > donate_priority)
-      donate_priority = t->priority;
-    if (donate_priority > max_donate_priority)
-      max_donate_priority = donate_priority;
+    if (t->priority > max_donate_priority)
+      max_donate_priority = t->priority;
   }
-  */
   /** reset the holder's priority to the max. donate priority if donate
       priority is higher.
    */
-  /*
   if (max_donate_priority > thread_current()->priority_old)
     thread_current()->priority = max_donate_priority;
   else
     thread_current()->priority = thread_current()->priority_old;
-  */
+
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 
-  /** Remove the thread's lock list and free the lock space if no reference. 
-   */
-  /*
-  if (list_empty (&lock->semaphore.waiters)) {
-    for (elem = list_begin (&thread_current()->all_locks);
-	 elem != list_end (&thread_current()->all_locks);
-	 elem = list_next (elem)) {
-      lock_elem = list_entry (elem, struct lock_elem, elem);
-      if (lock_elem->lock == lock) {
-	list_remove (elem);
-	free (lock_elem);
-	break;
-      }
-    }
-  }
-  */
+  /** For the lock is with initial state, remove it to kernel lock_list */
+  if (lock->holder == NULL && list_empty(&lock->semaphore.waiters)
+      && lock->semaphore.value == 1)
+    list_remove (&lock->allelem);
 }
 
 /* Returns true if the current thread holds LOCK, false

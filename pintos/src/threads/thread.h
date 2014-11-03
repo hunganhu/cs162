@@ -144,6 +144,7 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+void reset_donate_priority (void);
 /* Define a list_less_func which return true if a < b, else false.
  */
 bool less_priority (const struct list_elem *a,
