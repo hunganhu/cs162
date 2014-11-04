@@ -5,7 +5,6 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -100,6 +99,7 @@ struct thread
     int priority_old;                   /** thread original priority,     */
 					/** restored after releasing lock */
     struct list all_locks;              /** List of locks hold by this thread */
+    int64_t sleep_ticks;                /** time to sleep in ticks */
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -144,9 +144,6 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-/**Append the lock to lock_list */
-void append_lock_list (struct lock *);
 
 /** Reset the priority of a lock holder from the donation priority, the max
     priority of the threads waiting for the lock.*/

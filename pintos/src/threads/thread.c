@@ -65,7 +65,6 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
-
 static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
@@ -75,6 +74,9 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+
+void append_lock_list (struct lock *);  /** Append the lock to lock_list */
+void remove_lock_list (struct lock *);  /** Remove the lock to lock_list */
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -360,6 +362,18 @@ void append_lock_list (struct lock *lock)
   list_push_back (&lock_list, &lock->allelem);
   intr_set_level (old_level);
 }
+
+/**Remove the lock to lock_list */
+void remove_lock_list (struct lock *lock)
+{
+  ASSERT (lock != NULL);
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+  list_remove (&lock->allelem);
+  intr_set_level (old_level);
+}
+
 /** Reset the priority of a lock holder from the donation priority, the max
     priority of the threads waiting for the lock.
     When a thread's priority is changed, we need to check every lock holder

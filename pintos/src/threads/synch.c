@@ -215,11 +215,10 @@ lock_acquire (struct lock *lock)
       && lock->semaphore.value == 1)
     append_lock_list (lock);
 
-  if (lock->holder != NULL) {
+  if (lock->holder != NULL && !thread_mlfqs) {
     /** For donate priority, donate my priority to lock holder if higher */
     if (thread_current()->priority > lock->holder->priority)
       lock->holder->priority = thread_current()->priority;  
-
     reset_donate_priority ();
   }
 
@@ -281,32 +280,32 @@ lock_release (struct lock *lock)
     }
   }
 
-  /** Find the max donation priority of the waiting threads for other locks.
-   */
-  elem = list_head(&thread_current()->all_locks);
-  while((elem = list_next(elem)) != list_end(&thread_current()->all_locks)) {
-    lock_elem = list_entry(elem, struct lock, elem);
-    max = list_max(&lock_elem->semaphore.waiters, less_priority,
-		   sema_waiter_priority);
-    t = list_entry(max, struct thread, elem);
-    if (t->priority > max_donate_priority)
-      max_donate_priority = t->priority;
+  if (!thread_mlfqs) {
+    /** Find the max donation priority of the waiting threads for other locks.
+     */
+    elem = list_head(&thread_current()->all_locks);
+    while((elem = list_next(elem)) != list_end(&thread_current()->all_locks)) {
+      lock_elem = list_entry(elem, struct lock, elem);
+      max = list_max(&lock_elem->semaphore.waiters, less_priority,
+		     sema_waiter_priority);
+      t = list_entry(max, struct thread, elem);
+      if (t->priority > max_donate_priority)
+	max_donate_priority = t->priority;
+    }
+    /** reset the holder's priority to the max. donate priority if donate
+	priority is higher. */
+    if (max_donate_priority > thread_current()->priority_old)
+      thread_current()->priority = max_donate_priority;
+    else
+      thread_current()->priority = thread_current()->priority_old;
   }
-  /** reset the holder's priority to the max. donate priority if donate
-      priority is higher.
-   */
-  if (max_donate_priority > thread_current()->priority_old)
-    thread_current()->priority = max_donate_priority;
-  else
-    thread_current()->priority = thread_current()->priority_old;
-
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 
   /** For the lock is with initial state, remove it to kernel lock_list */
   if (lock->holder == NULL && list_empty(&lock->semaphore.waiters)
       && lock->semaphore.value == 1)
-    list_remove (&lock->allelem);
+    remove_lock_list (lock);
 }
 
 /* Returns true if the current thread holds LOCK, false
