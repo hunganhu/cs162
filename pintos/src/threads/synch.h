@@ -4,8 +4,6 @@
 #include <list.h>
 #include <stdbool.h>
 
-extern struct list lock_list;
-
 /* A counting semaphore. */
 struct semaphore 
   {
@@ -26,13 +24,6 @@ struct lock
     struct semaphore semaphore; /* Binary semaphore controlling access. */
     struct list_elem allelem;   /* List element of kernel lock_list. */
     struct list_elem elem;      /* List element. */
-  };
-
-/* One lock in a list. */
-struct lock_elem 
-  {
-    struct list_elem elem;              /* List element. */
-    struct lock      *lock;             /* This lock. */
   };
 
 void lock_init (struct lock *);

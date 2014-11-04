@@ -5,6 +5,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -144,23 +145,24 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+/**Append the lock to lock_list */
+void append_lock_list (struct lock *);
+
+/** Reset the priority of a lock holder from the donation priority, the max
+    priority of the threads waiting for the lock.*/
 void reset_donate_priority (void);
-/* Define a list_less_func which return true if a < b, else false.
- */
-bool less_priority (const struct list_elem *a,
-		   const struct list_elem *b,
-		   void *aux);
-/* Declare a function type to get the thread priority of a list element
- */
-typedef int (*get_priority_func) (const struct list_elem *a);
+
+/* Define a list_less_func which return true if a < b, else false. */
+bool less_priority (const struct list_elem *,
+		    const struct list_elem *,
+		    void *);
+/* Declare a function type to get the thread priority of a list element */
+typedef int (*get_priority_func) (const struct list_elem *);
 
 /* get the thread priority in a semaphore wait list */
-int sema_waiter_priority (const struct list_elem *a);
+int sema_waiter_priority (const struct list_elem *);
 
 /* get the thread priority in a condition wait list */
-int cond_waiter_priority (const struct list_elem *a);
-
-/* get the max donate priority in a thread's lock list */
-// int lock_donate_priority (const struct list_elem *a);
+int cond_waiter_priority (const struct list_elem *);
 
 #endif /* threads/thread.h */

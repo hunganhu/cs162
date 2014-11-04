@@ -29,6 +29,10 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* List of all locks. Locks are added to this list when they are first 
+   acquired and removed when they are last released. */
+static struct list lock_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -345,9 +349,27 @@ thread_foreach (thread_action_func *func, void *aux)
       func (t, aux);
     }
 }
+
+/**Append the lock to lock_list */
+void append_lock_list (struct lock *lock)
+{
+  ASSERT (lock != NULL);
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+  list_push_back (&lock_list, &lock->allelem);
+  intr_set_level (old_level);
+}
+/** Reset the priority of a lock holder from the donation priority, the max
+    priority of the threads waiting for the lock.
+    When a thread's priority is changed, we need to check every lock holder
+    whether it should be donated. When we access the shared object lock_list,
+    interrupt should be disabled.
+*/
 void
 reset_donate_priority (void)
 {
+  enum intr_level old_level;
   struct list_elem *allelem;     /** element in kernel lock_list */  
   struct lock *this_lock;
   struct list_elem *max;
@@ -356,6 +378,7 @@ reset_donate_priority (void)
   /** For donate priority, check every lock in kernel lock_list. Update the
       lock holder's priority to be the max priority of the waiting threads.
   */
+  old_level = intr_disable ();
   allelem = list_head(&lock_list);
   while ((allelem = list_next(allelem)) != list_end(&lock_list)) {
     this_lock = list_entry(allelem, struct lock, allelem);
@@ -370,6 +393,7 @@ reset_donate_priority (void)
       reset_donate_priority ();
     }
   }
+  intr_set_level (old_level);
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */

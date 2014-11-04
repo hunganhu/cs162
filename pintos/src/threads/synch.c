@@ -32,7 +32,6 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/malloc.h"     /** for function malloc() and free() */
-struct list lock_list;          /** a list of all locks acquired in a system  */
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -211,16 +210,10 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  struct list_elem *allelem;     /** element in kernel lock_list */  
-  struct lock *this_lock;
-  struct list_elem *max;
-  struct thread    *t;
-  //  int    max_donate_priority = 0;
-
   /** For the lock is with initial state, add it to kernel lock_list */
   if (lock->holder == NULL && list_empty(&lock->semaphore.waiters) 
       && lock->semaphore.value == 1)
-    list_push_back (&lock_list, &lock->allelem);
+    append_lock_list (lock);
 
   if (lock->holder != NULL) {
     /** For donate priority, donate my priority to lock holder if higher */
