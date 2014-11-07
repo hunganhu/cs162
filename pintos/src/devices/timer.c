@@ -29,7 +29,6 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-static void wake_threads (struct thread *, void *);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -91,14 +90,16 @@ void
 timer_sleep (int64_t ticks) 
 {
   ASSERT (intr_get_level () == INTR_ON);
+  enum intr_level old_level;
+  struct thread *t = thread_current();
 
   if (ticks > 0) {
     // assign requested sleep time to current thread
-    thread_current()->sleep_ticks = ticks;
+    t->sleep_ticks = ticks;
+
     // disable interrupts to allow thread blocking
-    enum intr_level old_level = intr_disable();
-    // block current thread
-    thread_block();
+    old_level = intr_disable();
+    thread_block ();    // block current thread
     /* set old interrupt level which was used before the current thread was
        blocked to ensure that no other logic crashes */
     intr_set_level(old_level);
@@ -176,35 +177,18 @@ timer_print_stats (void)
 }
 
 /* Timer interrupt handler. */
+/**If the timer interrupt handler takes too
+   long, then the test's main thread will not have enough time to
+   do its own work (printing a message) and go back to sleep
+   before the next tick arrives.  Then the main thread will be
+   ready, instead of sleeping, when the tick arrives,
+   artificially driving up the load average.
+ */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
-  /** Check each thread with wake_threads() after each tick. It is assumed that
-      interrupts are disabled  because timer_interrupt() is an interrupt
-      handler.*/
-  thread_foreach(wake_threads, 0);
-}
-
-/**
- * Function for waking up a sleeping thread. It checks
- * whether a thread is being blocked. If TRUE, then
- * check whether the thread's sleep_ticks has reached 0 or not
- * by decrementing it on each conditional statement.
- * If the thread's sleep_ticks has reached 0, then unblock the
- * sleeping thread.
- */
-static void
-wake_threads(struct thread *t, void *aux UNUSED)
-{
-  if(t->status == THREAD_BLOCKED) {
-    if(t->sleep_ticks > 0) {
-      t->sleep_ticks--;
-      if(t->sleep_ticks == 0)
-	thread_unblock(t);
-    }
-  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
