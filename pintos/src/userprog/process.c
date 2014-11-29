@@ -15,21 +15,27 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"  // added for alloc buffer for argv
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool argument_passing (int argc, char **argv, void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
+/** Extend the function to support argument passing.
+ */
 tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
   tid_t tid;
+  char process_name[16];
+  char *s, *t; 
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -37,9 +43,16 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-
+  
+  /** read the first token as process name */
+  for (s = process_name, t = fn_copy; *t != '\0'; s++, t++)
+    if (*t != ' ' && *t != '\t')
+      *s = *t;
+    else 
+      break;
+  *s = '\0';
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (process_name, PRI_DEFAULT+1, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -48,23 +61,51 @@ process_execute (const char *file_name)
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *command_line_)
 {
-  char *file_name = file_name_;
+  char *command_line;
   struct intr_frame if_;
   bool success;
+
+  char *token, *save_ptr, **argv; // declare variables for strtok_r()
+  int argc, i;
+  char *delimiters = " \t";                // space, and tab
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+
+  /** get the number of arguments*/
+  command_line = malloc(strlen(command_line_) + 1); //length include '\0'
+  strlcpy (command_line, command_line_, strlen(command_line_) + 1);
+  for (token = strtok_r (command_line, delimiters, &save_ptr), argc = 0;
+       token != NULL;
+       token = strtok_r (NULL, delimiters, &save_ptr))
+    argc++;
+
+  /** get the arguments */
+  argv = malloc (argc * sizeof(char *));
+  strlcpy (command_line, command_line_, strlen(command_line_) + 1);
+  for (token = strtok_r (command_line, delimiters, &save_ptr), i = 0;
+       token != NULL;
+       token = strtok_r (NULL, delimiters, &save_ptr))
+    argv[i++] = token;
+
+  success = load (argv[0], &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  //  palloc_free_page (command_line_);
   if (!success) 
     thread_exit ();
+
+  /** Pass the argument to the top of user address space */
+  if (!argument_passing(argc, argv, &if_.esp))
+    thread_exit ();
+
+  palloc_free_page (command_line_);
+  free(argv);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -74,6 +115,89 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+/**
+int x;
+void *ptr;
+
+void * pointers can never be directly used to access the memory to which they 
+point because the size and type of the location is unknown.
+if you write
+x = *ptr;
+you will get the rather obnoxious message “…warning: dereferencing 'void *' 
+pointer” followed by “…error: invalid use of void expression”.
+There are two ways to avoid this problem:
+1. type casting: You can “tell” the compiler the type of the data that “ptr”
+   is pointing to, i.e.:
+   x= *(int *)ptr;
+   This is telling the compiler to treat “ptr” as a pointer to something of
+   type “int”, and then copy the integer contents it is pointing to to x.
+2. Define a separate integer pointer and copy “ptr” to it; the other technique
+   is to simply define another pointer, i.e.:
+   int *intPtr;
+   intPtr = ptr;
+   x = *intPtr;
+*/
+static
+bool push_address (void **stack_ptr, void *address, void **esp) 
+{
+  if (((int)*esp - ((int)*stack_ptr - sizeof(void *))) > PGSIZE)
+    return false;
+
+  *stack_ptr -= sizeof(void *);   // 4-byte address
+  *(void **)*stack_ptr = address;
+  return true;
+}
+
+/** pass the program argument to the top of user addressing space*/
+static
+bool argument_passing (int argc, char **argv, void **esp)
+{
+  int i;
+  void **arg_addr;
+  void *stack_top;
+  int arg_len;
+  bool success = true;
+  void *start_arg;
+  long padding;
+
+  stack_top = *esp;
+  arg_addr = malloc(argc * sizeof (char *));
+  /**push arguments to *esp in reverse order*/
+  for (i = argc - 1; i >= 0; i--) {
+    arg_len = strlen (argv[i]);
+    stack_top = stack_top - (arg_len + 1);
+    arg_addr[i] = stack_top;
+    strlcpy ((char *) arg_addr[i], argv[i], arg_len + 1);
+  }
+  /**pad 0 for word align */
+  padding = sizeof(void *) - ((long)*esp - (long)stack_top) % sizeof(void *);
+  for (i = 0; i < padding; i++) {
+    *(char *)(--stack_top) = '\0';
+  }
+  /**push the addresses of arguments and a fake return address */
+  // push a null pointer sentinel to ensure that argv[argc] is a null pointer
+  push_address ((void **) &stack_top, NULL, esp);
+  // push address of arguments in reverse order
+  for (i = argc - 1; i >= 0; i--) {
+    push_address ((void **) &stack_top, (void *) arg_addr[i], esp);
+  }
+  // keep the start address of argument list
+  start_arg = stack_top;
+  // push address of argv
+  push_address ((void **) &stack_top, start_arg, esp);
+  // push argc
+  push_address ((void **) &stack_top, (void *) argc, esp);
+  //push a fake return address
+  push_address ((void **) &stack_top, NULL, esp);
+
+  //dump the content of argument stack
+  /* hex_dump ((uintptr_t)stack_top, stack_top, ((int)*esp - (int)stack_top),
+     true); */
+  // initial stack pointer to new position
+  *esp = stack_top;
+
+  return success;
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -88,7 +212,10 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  if (child_tid == TID_ERROR)
+    return -1;
+  else 
+    return 0;
 }
 
 /* Free the current process's resources. */
@@ -114,6 +241,7 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  printf ("%s: exit(%d)\n", cur->name, cur->exit_status);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -315,6 +443,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file_close (file);
   return success;
 }
+
 
 /* load() helpers. */
 

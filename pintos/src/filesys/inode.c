@@ -8,6 +8,7 @@
 #include "threads/malloc.h"
 
 /* Identifies an inode. */
+/** ASCII value of 'INODE' */
 #define INODE_MAGIC 0x494e4f44
 
 /* On-disk inode.

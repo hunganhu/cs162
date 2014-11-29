@@ -21,13 +21,13 @@ filesys_init (bool format)
   if (fs_device == NULL)
     PANIC ("No file system device found, can't initialize file system.");
 
-  inode_init ();
-  free_map_init ();
+  inode_init ();    /** initial an empty inode list */  
+  free_map_init (); /** create block free map in memory*/
 
   if (format) 
-    do_format ();
+    do_format ();   /** writ block bitmap to a file and create root dir */
 
-  free_map_open ();
+  free_map_open (); /** restore block bitmap from free_map file */
 }
 
 /* Shuts down the file system module, writing any unwritten data
@@ -91,12 +91,13 @@ filesys_remove (const char *name)
 }
 
 /* Formats the file system. */
+/** writ block bitmap to free bitmap file and create root dir */
 static void
 do_format (void)
 {
   printf ("Formatting file system...");
-  free_map_create ();
-  if (!dir_create (ROOT_DIR_SECTOR, 16))
+  free_map_create ();    /** write block free map to a file */
+  if (!dir_create (ROOT_DIR_SECTOR, 16)) /** create root dir with 16 entries */
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");

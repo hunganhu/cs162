@@ -15,6 +15,7 @@
 #include "threads/fixed-point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "filesys/file.h"
 #endif
 #include "devices/timer.h"
 
@@ -638,6 +639,7 @@ static void
 init_thread (struct thread *t, const char *name, int priority)
 {
   enum intr_level old_level;
+  int i;
 
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
@@ -657,6 +659,12 @@ init_thread (struct thread *t, const char *name, int priority)
 
   /** Initial lock list */
   list_init (&t->all_locks);
+#ifdef USERPROG
+  for (i = 0; i < FD_MAX; i++ )
+    t->fd_table[i] = NULL;
+  /** Set next FD id, next value of STDIN_FILENO and STDOUT_FILENO */
+  t->next_fd = 2;
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
