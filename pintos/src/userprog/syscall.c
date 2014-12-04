@@ -1,4 +1,6 @@
 #include "userprog/syscall.h"
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include <user/syscall.h>
 #include <syscall-nr.h>
@@ -6,6 +8,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
+#include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 
@@ -22,18 +25,21 @@ static bool valid_user_fd (int);
 static uint32_t read_argument (struct intr_frame *, int);
 
 static void sys_halt (void);
-static void sys_exit (int status);
-static pid_t sys_exec (const char *file);
-static int sys_wait (pid_t pid);
-static bool sys_create (const char *file, unsigned initial_size);
-static bool sys_remove (const char *file);
-static int sys_open (const char *file);
-static int sys_filesize (int fd);
-static int sys_read (int fd, void *buffer, unsigned length);
-static int sys_write (int fd, const void *buffer, unsigned length);
-static void sys_seek (int fd, unsigned position);
-static int sys_tell (int fd);
-static void sys_close (int fd);
+static void sys_exit (int);
+static pid_t sys_exec (const char *);
+static int sys_wait (pid_t);
+static bool sys_create (const char *, unsigned);
+static bool sys_remove (const char *);
+static int sys_open (const char *);
+static int sys_filesize (int);
+static int sys_read (int, void *, unsigned);
+static int sys_write (int, const void *, unsigned);
+static void sys_seek (int, unsigned);
+static int sys_tell (int);
+static void sys_close (int);
+
+static int get_user (const uint8_t *);
+static bool put_user (uint8_t *, uint8_t);
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -44,6 +50,8 @@ syscall_handler (struct intr_frame *f UNUSED)
   arg0 = read_argument(f, 0);
   syscall_no = (int) arg0;
 
+  /* Synchronize syscall operation */
+  lock_acquire (&syscall_lock);
   switch (syscall_no)
     {
     case SYS_HALT:                   /* 0 Halt the operating system. */
@@ -119,16 +127,21 @@ syscall_handler (struct intr_frame *f UNUSED)
     default:
       break;
     }
-
-  //  thread_exit ();
+  lock_release(&syscall_lock);
 }
 
 /* Check validity of buffer starting at vaddr, with length of size*/
 static bool
 access_ok (const void * vaddr, unsigned size)
 {
-  /* If the address exceeds PHYS_BASE, exit -1 */
-  if (!is_user_vaddr (vaddr + size)) 
+  struct thread *t = thread_current();
+  uint32_t *pd = t->pagedir;
+
+  /* If the address exceeds PHYS_BASE, or address is not mapped,  exit -1 */
+  if (!is_user_vaddr (vaddr + size) ||
+      !is_user_vaddr (vaddr) ||
+      pagedir_get_page (pd, vaddr) == NULL || 
+      pagedir_get_page (pd, vaddr + size) == NULL)
     return false;
 
   return true;
@@ -146,8 +159,8 @@ static uint32_t
 read_argument (struct intr_frame *f, int offset)
 {
   /* Check address */
-  //  if (!access_ok (f->esp + offset * sizeof (void *), 0))
-  //    kill_process();
+  if (!access_ok (f->esp, offset * sizeof (void *)))
+    sys_exit(-1);
 
   return *(uint32_t *)(f->esp + offset * sizeof (void *));
 }
@@ -161,7 +174,8 @@ static void sys_halt (void)
 static void sys_exit (int status)
 {
   struct thread *t = thread_current ();
-  t->exit_status = status;
+  t->exit_code = status;
+  t->is_exited = true;
 
   thread_exit ();
 }
@@ -169,45 +183,71 @@ static void sys_exit (int status)
 static pid_t sys_exec (const char *file)
 {
   /** verify parameters */
-  if (file == NULL)
+  if (file == NULL || !access_ok(file, 0))
     sys_exit(-1);
+  
+  pid_t pid = -1;
+  pid = process_execute(file);
 
-  return (pid_t)-1;
+  return pid;
 }
 
 static int sys_wait (pid_t pid)
 {
+  int success = -1;
   if (pid == TID_ERROR)
     sys_exit(-1);
 
-  return -1;
+  success = process_wait(pid);
+  return success;
 }
 
 static bool sys_create (const char *file, unsigned initial_size)
 {
   /** verify parameters */
-  if (file == NULL)
+  if (!access_ok(file, 0) || *file == '\0')
     sys_exit(-1);
 
-  return false;
+  bool success = false;
+  // the name of file cannot be empty and cannot be existed
+  if (filesys_open(file) == NULL)
+    success = filesys_create (file, initial_size);
+  else
+    success = false;
+  return success;
 }
 
 static bool sys_remove (const char *file)
 {
   /** verify parameters */
-  if (file == NULL)
+  if (!access_ok(file, 0))
     sys_exit(-1);
 
-  return false;
+  bool success = false;
+  if (filesys_open(file) != NULL) {
+    success = filesys_remove (file);
+  }
+  return success;
+
 }
 
 static int sys_open (const char *file)
 {
   /** verify parameters */
-  if (file == NULL)
+  if (file == NULL || !access_ok(file, 0))
     sys_exit(-1);
 
-  return -1;
+  struct thread *t = thread_current ();
+ 
+  /* Get file info*/
+  struct file *file_ = filesys_open(file);
+  int fd = -1;
+
+  if (file_ != NULL) {
+    fd = t->next_fd++;
+    t->fd_table[fd] = file_;
+  }
+  return fd;
 }
 
 static int sys_filesize (int fd)
@@ -216,50 +256,78 @@ static int sys_filesize (int fd)
   if (!valid_user_fd(fd))
     sys_exit(-1);
 
-  return -1;
+  struct thread *t = thread_current ();
+  int size = -1;
+ 
+  /* Get file info*/
+  struct file *file_ = t->fd_table[fd];
+  
+  if (file_ != NULL) {
+    size = file_length(file_);
+  }
+  return size;
 }
 
-static int sys_read (int fd, void *buffer, unsigned length)
+static int sys_read (int fd, void *buffer, unsigned size)
 {
   /** verify parameters */
-  if (!access_ok (buffer, 0) || !valid_user_fd(fd))
+  if (!access_ok (buffer, size) || !valid_user_fd(fd) || fd == STDOUT_FILENO)
     sys_exit(-1);
 
-  return -1;
+  struct thread *t = thread_current ();
+  int byte_read = -1;
+  unsigned i;
+  char *buf = (char *) buffer;  // convert void type pointer to char 
+
+  if (fd == STDIN_FILENO) {
+    for ( i = 0; i < size; i ++) {
+      *(buf + i) = input_getc();
+    }
+    byte_read = i;
+  } if (fd == STDOUT_FILENO) {
+    byte_read = -1;
+  }
+  else {
+    /* Get file info*/
+    struct file *file_ = t->fd_table[fd];
+    off_t offset;
+
+    if (file_ != NULL) {
+      offset = file_tell(file_);
+      byte_read = file_read_at (file_, buffer, size, offset);
+    }
+  }
+  return byte_read;
 }
 
-static int sys_write (int fd, const void *buffer, unsigned length)
+static int sys_write (int fd, const void *buffer, unsigned size)
 {
   /** verify parameters */
-  if (!access_ok (buffer, 0) || !valid_user_fd(fd) || fd == STDIN_FILENO)
+  if (!access_ok (buffer, size) || !valid_user_fd(fd) || fd == STDIN_FILENO)
     sys_exit(-1);
 
   struct thread *t = thread_current ();
   unsigned byte_written = -1;
 
   if (fd == STDOUT_FILENO) {
-    putbuf(buffer, length);
-    byte_written = length;
+    putbuf(buffer, size);
+    byte_written = size;
   } if (fd == STDIN_FILENO) {
     byte_written = -1;
   }
   else {
-      /* Get file info*/
-      struct file *file_ = t->fd_table[fd];
-      off_t offset;
+    /* Get file info*/
+    struct file *file_ = t->fd_table[fd];
+    off_t offset;
 
-      if (file_ != NULL) {
-	/* Synchronize filesys operation */
-	//lock_acquire (filesys_lock);
-	offset = file_->pos;
-	byte_written = file_write_at (file_, buffer, length, offset);
-	
-	/* Increment position within file for current thread */
-	if (byte_written > 0)
-	  file_->pos += byte_written;
-	
-	//lock_release (filesys_lock);
-      }
+    if (file_ != NULL) {
+      offset = file_->pos;
+      byte_written = file_write_at (file_, buffer, size, offset);
+      
+      /* Increment position within file for current thread */
+      if (byte_written > 0)
+	file_->pos += byte_written;
+    }
   }
   return byte_written;
 }
@@ -274,12 +342,8 @@ static void sys_seek (int fd, unsigned position)
   /* Get file info*/
   struct file *file_ = t->fd_table[fd];
   
-  if (file_ != NULL) {
-    /* Synchronize filesys operation */
-    //lock_acquire (filesys_lock);
-    file_->pos = position;
-    //lock_release (filesys_lock);
-  }
+  if (file_ != NULL)
+    file_seek(file_, position);
 }
 
 static int sys_tell (int fd)
@@ -294,12 +358,8 @@ static int sys_tell (int fd)
   /* Get file info*/
   struct file *file_ = t->fd_table[fd];
   
-  if (file_ != NULL) {
-    /* Synchronize filesys operation */
-    //lock_acquire (filesys_lock);
-    position = file_->pos;
-    //lock_release (filesys_lock);
-  }
+  if (file_ != NULL)
+    position = file_tell(file_);
 
   return position;
 }
@@ -310,5 +370,38 @@ static void sys_close (int fd)
   if (!valid_user_fd(fd))
     sys_exit(-1);
 
+  struct thread *t = thread_current ();
+
+  /* Get file info*/
+  struct file *file_ = t->fd_table[fd];
+  
+  if (file_ != NULL) {
+    file_close(file_);
+    t->fd_table[fd] = NULL;
+  }
 }
 
+
+/* Reads a byte at user virtual address UADDR.
+   UADDR must be below PHYS_BASE.
+   Returns the byte value if successful, -1 if a segfault
+   occurred. */
+static int
+get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:"
+       : "=&a" (result) : "m" (*uaddr));
+  return result;
+}
+/* Writes BYTE to user address UDST.
+   UDST must be below PHYS_BASE.
+   Returns true if successful, false if a segfault occurred. */
+static bool
+put_user (uint8_t *udst, uint8_t byte)
+{
+  int error_code;
+  asm ("movl $1f, %0; movb %b2, %1; 1:"
+       : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+  return error_code != -1;
+}

@@ -22,6 +22,7 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static bool argument_passing (int argc, char **argv, void **esp);
+bool in_waitlist (struct list *list, struct list_elem *elem);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -36,6 +37,8 @@ process_execute (const char *file_name)
   tid_t tid;
   char process_name[16];
   char *s, *t; 
+  struct thread *cur = thread_current ();
+  struct thread *child;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -51,10 +54,22 @@ process_execute (const char *file_name)
     else 
       break;
   *s = '\0';
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (process_name, PRI_DEFAULT+1, start_process, fn_copy);
+  /**the parent process cannot return from the exec until it knows whether
+     the child process successfully loaded its executable. You must use
+     appropriate synchronization to ensure this.*/
+  lock_acquire (&syscall_lock);
+  tid = thread_create (process_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
+  else {
+    /**Append child thread to parent's child_list*/
+    child = get_thread (tid);
+    child->parent_id = cur->tid;
+    list_push_back (&cur->child_list, &child->child_elem);
+  } 
+  lock_release(&syscall_lock);
   return tid;
 }
 
@@ -65,7 +80,7 @@ start_process (void *command_line_)
 {
   char *command_line;
   struct intr_frame if_;
-  bool success;
+  bool success, status;
 
   char *token, *save_ptr, **argv; // declare variables for strtok_r()
   int argc, i;
@@ -94,18 +109,15 @@ start_process (void *command_line_)
     argv[i++] = token;
 
   success = load (argv[0], &if_.eip, &if_.esp);
+  /** Pass the argument to the top of user address space */
+  status = argument_passing(argc, argv, &if_.esp);
 
   /* If load failed, quit. */
-  //  palloc_free_page (command_line_);
-  if (!success) 
-    thread_exit ();
-
-  /** Pass the argument to the top of user address space */
-  if (!argument_passing(argc, argv, &if_.esp))
-    thread_exit ();
-
   palloc_free_page (command_line_);
   free(argv);
+  free(command_line);
+  if (!success || !status) 
+    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -212,10 +224,47 @@ bool argument_passing (int argc, char **argv, void **esp)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  if (child_tid == TID_ERROR)
+  if (child_tid == TID_ERROR) // Invalid tid
     return -1;
-  else 
-    return 0;
+
+  struct thread *cur = thread_current ();
+  struct thread *child = get_thread (child_tid);
+  int success = -1;
+
+  if (child == NULL) {  // child process is not alived
+    success = -1;
+  } else { // child is alived
+    if (cur->tid == child->parent_id) { //it is a child 
+      if (child->is_exited) {
+	// free child process
+	success = child->exit_code;
+      }
+      else
+	if (in_waitlist(&cur->wait_list, &child->wait_elem)) {
+	  success = -1;
+	} else {
+	  list_push_back(&cur->wait_list, &child->wait_elem);
+	  sema_down (&cur->sema_wait);
+	  success = 0;
+	}
+    } else { // it was not a child of the calling process
+      success = -1;
+    }
+  }
+  return success;
+}
+
+bool in_waitlist (struct list *list, struct list_elem *elem)
+{
+  struct list_elem *e;
+  bool success = false;
+
+  for (e = list_begin (list); e != list_end (list); e = list_next(e))
+    if (e == elem) {
+      success = true;
+      break;
+    }
+  return success;
 }
 
 /* Free the current process's resources. */
@@ -224,7 +273,9 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
-
+  int i;
+  struct thread *parent = get_thread(cur->parent_id);
+ 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -241,7 +292,21 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  printf ("%s: exit(%d)\n", cur->name, cur->exit_status);
+  /** Free all file descriptors */
+  for (i = 2; i < cur->next_fd; i++)
+    if (cur->fd_table[i] != NULL) {
+      file_close(cur->fd_table[i]);
+      cur->fd_table[i] = NULL;
+    }
+
+  if (parent != NULL) {
+    if (in_waitlist (&parent->wait_list, &cur->wait_elem)) {
+      list_remove (&cur->wait_elem);
+      list_remove (&cur->child_elem);
+      sema_up (&parent->sema_wait);
+    } 
+  }
+  printf ("%s: exit(%d)\n", cur->name, cur->exit_code);
 }
 
 /* Sets up the CPU for running user code in the current

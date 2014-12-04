@@ -109,7 +109,14 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct file *fd_table[FD_MAX];      /**File descriptor array */
     int     next_fd;                    /**Next file descriptor id */
-    int     exit_status;                /**exit error number*/ 
+    bool    is_exited;                  /**has called exit() */
+    int     exit_code;                  /**Exit status number*/ 
+    struct list child_list;             /**List of children created */
+    struct list wait_list;              /**List of waiting children */
+    tid_t   parent_id;                  /**Parent tid */
+    struct semaphore sema_wait;         /**Event indicator of wait syscall */
+    struct list_elem child_elem;
+    struct list_elem wait_elem;
 #endif
 
     /* Owned by thread.c. */
@@ -120,6 +127,11 @@ struct thread
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+#ifdef USERPROG
+/** Lock used for syscall synchronization */
+struct lock syscall_lock;
+#endif
 
 void thread_init (void);
 void thread_start (void);
@@ -156,6 +168,8 @@ int thread_get_load_avg (void);
 void thread_set_load_avg (void);        /** recalculate load average */
 void append_lock_list (struct lock *);  /** Append the lock to lock_list */
 void remove_lock_list (struct lock *);  /** Remove the lock to lock_list */
+
+struct thread * get_thread (tid_t tid); /** Get thread entry from tid */
 
 /** Reset the priority of a lock holder from the donation priority, the max
     priority of the threads waiting for the lock.*/

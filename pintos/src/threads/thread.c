@@ -114,6 +114,9 @@ thread_init (void)
   }
   list_init (&all_list);
   list_init (&lock_list);
+#ifdef USERPROG
+  lock_init (&syscall_lock);
+#endif
 
   load_avg = 0;   /** initial system wide load average */
   /* Set up a thread structure for the running thread. */
@@ -662,8 +665,12 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   for (i = 0; i < FD_MAX; i++ )
     t->fd_table[i] = NULL;
-  /** Set next FD id, next value of STDIN_FILENO and STDOUT_FILENO */
+  /** Set next FD id, next value after STDIN_FILENO and STDOUT_FILENO */
   t->next_fd = 2;
+  t->parent_id = TID_ERROR;
+  list_init (&t->child_list);
+  list_init (&t->wait_list);
+  sema_init (&t->sema_wait, 0);
 #endif
 
   old_level = intr_disable ();
@@ -910,6 +917,20 @@ int cond_waiter_priority (const struct list_elem *a) {
   return list_entry (list_begin (&(&list_entry(a, struct semaphore_elem, 
 					     elem)->semaphore)->waiters),
 		     struct thread, elem)->priority;
+}
+
+struct thread * get_thread (tid_t tid)
+{
+  struct thread *t = NULL;
+  struct list_elem *e;
+
+  for (e = list_begin (&all_list); e != list_end (&all_list); 
+       e = list_next (e)) {
+    t = list_entry(e, struct thread, allelem);
+    if (t->tid == tid)
+      return t;
+  }
+  return NULL;
 }
 
 
