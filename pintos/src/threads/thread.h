@@ -26,6 +26,19 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 #define FD_MAX 128                      /**Max files opened concurrently */
+/** Communication area between parent and child */
+struct process
+{
+  struct semaphore sema_wait;         /**Event indicator of wait syscall */
+  struct semaphore sema_exit;         /**Event indicator of child exit */
+  bool    is_exited;                  /**has called exit() */
+  int     exit_code;                  /**Exit status number*/ 
+  bool    is_waited;                  /**Is waited by parent */
+  bool    is_loaded;                  /**Program loaded */
+  tid_t   pid;                        /**Process ID */
+  struct list_elem child_elem;
+};
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -109,14 +122,11 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct file *fd_table[FD_MAX];      /**File descriptor array */
     int     next_fd;                    /**Next file descriptor id */
-    bool    is_exited;                  /**has called exit() */
-    int     exit_code;                  /**Exit status number*/ 
-    struct list child_list;             /**List of children created */
-    struct list wait_list;              /**List of waiting children */
     tid_t   parent_id;                  /**Parent tid */
-    struct semaphore sema_wait;         /**Event indicator of wait syscall */
-    struct list_elem child_elem;
-    struct list_elem wait_elem;
+    struct list child_list;             /**List of children  */
+    struct semaphore sema_load;         /**Event indicator of child loaded */
+    struct process *process;            /**process info used to communicate 
+					   with parent */
 #endif
 
     /* Owned by thread.c. */
@@ -131,6 +141,8 @@ extern bool thread_mlfqs;
 #ifdef USERPROG
 /** Lock used for syscall synchronization */
 struct lock syscall_lock;
+/** Lock used for update process info in thread */
+struct lock userprog_lock;
 #endif
 
 void thread_init (void);

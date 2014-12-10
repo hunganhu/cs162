@@ -46,12 +46,14 @@ syscall_handler (struct intr_frame *f UNUSED)
 {
   int syscall_no;
   uint32_t arg0, arg1, arg2, arg3;
+  struct thread *cur = thread_current();
 
   arg0 = read_argument(f, 0);
   syscall_no = (int) arg0;
 
+  //  printf("[%s] in syscall(%d).\n", cur->name, syscall_no);
   /* Synchronize syscall operation */
-  lock_acquire (&syscall_lock);
+  //  lock_acquire (&syscall_lock);
   switch (syscall_no)
     {
     case SYS_HALT:                   /* 0 Halt the operating system. */
@@ -127,7 +129,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     default:
       break;
     }
-  lock_release(&syscall_lock);
+  //  lock_release(&syscall_lock);
 }
 
 /* Check validity of buffer starting at vaddr, with length of size*/
@@ -144,7 +146,7 @@ access_ok (const void * vaddr, unsigned size)
       pagedir_get_page (pd, vaddr + size) == NULL)
     return false;
 
-  return true;
+  return true; 
 }
 static bool
 valid_user_fd (int fd)
@@ -174,8 +176,8 @@ static void sys_halt (void)
 static void sys_exit (int status)
 {
   struct thread *t = thread_current ();
-  t->exit_code = status;
-  t->is_exited = true;
+  t->process->exit_code = status;
+  t->process->is_exited = true;
 
   thread_exit ();
 }

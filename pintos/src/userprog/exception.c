@@ -161,8 +161,8 @@ page_fault (struct intr_frame *f)
     kill (f);
   } else {
     struct thread *t = thread_current ();
-    t->exit_code = -1;
-    t->is_exited = true;
+    t->process->exit_code = -1;
+    t->process->is_exited = false;
     thread_exit ();
   }
 }

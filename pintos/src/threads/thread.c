@@ -86,6 +86,10 @@ int thread_active (void);
 void thread_refresh_recent_cpu (struct thread *);
 void thread_refresh_priority (struct thread *);
 
+#ifdef USERPROG
+void init_process(struct thread *);
+#endif
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -116,6 +120,7 @@ thread_init (void)
   list_init (&lock_list);
 #ifdef USERPROG
   lock_init (&syscall_lock);
+  lock_init (&userprog_lock);
 #endif
 
   load_avg = 0;   /** initial system wide load average */
@@ -131,6 +136,10 @@ thread_init (void)
 void
 thread_start (void) 
 {
+  /** initial semaphore in init() to sync program load */
+#ifdef USERPROG
+  init_process (initial_thread);
+#endif
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
@@ -258,7 +267,12 @@ thread_create (const char *name, int priority,
 
   /* Initialize thread. */
   init_thread (t, name, priority);
-  tid = t->tid = allocate_tid ();
+#ifdef USERPROG
+  init_process (t);
+#endif
+  tid = t->tid = t->process->pid = allocate_tid ();
+  //  if (t != initial_thread)
+  //    t->parent_id = running_thread()->tid;
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -284,7 +298,6 @@ thread_create (const char *name, int priority,
    */
   if (t->priority > thread_current ()->priority)
     thread_yield();
-
 
   return tid;
 }
@@ -642,7 +655,6 @@ static void
 init_thread (struct thread *t, const char *name, int priority)
 {
   enum intr_level old_level;
-  int i;
 
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
@@ -662,16 +674,6 @@ init_thread (struct thread *t, const char *name, int priority)
 
   /** Initial lock list */
   list_init (&t->all_locks);
-#ifdef USERPROG
-  for (i = 0; i < FD_MAX; i++ )
-    t->fd_table[i] = NULL;
-  /** Set next FD id, next value after STDIN_FILENO and STDOUT_FILENO */
-  t->next_fd = 2;
-  t->parent_id = TID_ERROR;
-  list_init (&t->child_list);
-  list_init (&t->wait_list);
-  sema_init (&t->sema_wait, 0);
-#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -931,6 +933,26 @@ struct thread * get_thread (tid_t tid)
       return t;
   }
   return NULL;
+}
+
+void init_process(struct thread *t)
+{
+  memset (t->fd_table, 0, sizeof (t->fd_table)); 
+  /** Set next FD id, next value after STDIN_FILENO and STDOUT_FILENO */
+  t->next_fd = 2;
+  list_init (&t->child_list);
+  sema_init (&t->sema_load, 0);
+
+  t->process = (struct process *) palloc_get_page(PAL_ZERO);
+  ASSERT (t->process != NULL);
+
+  t->process->is_exited = false;
+  t->process->is_waited = false;
+  t->process->is_loaded = false;
+  t->process->exit_code = -1;  
+  sema_init (&t->process->sema_wait, 0);
+
+  t->parent_id = running_thread()->tid;
 }
 
 
