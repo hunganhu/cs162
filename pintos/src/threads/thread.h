@@ -26,11 +26,16 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 #define FD_MAX 128                      /**Max files opened concurrently */
-/** Communication area between parent and child */
+
+/** The process info is a communication area between parent and its child.
+    When parent fork a child, the child allocates another page to store
+    and append it communication info to parent's child_list. When a child
+    stops, it breaks the link but keep its status in the area. It lefts 
+    for parent to free the resource.
+*/
 struct process
 {
   struct semaphore sema_wait;         /**Event indicator of wait syscall */
-  struct semaphore sema_exit;         /**Event indicator of child exit */
   bool    is_exited;                  /**has called exit() */
   int     exit_code;                  /**Exit status number*/ 
   bool    is_waited;                  /**Is waited by parent */
@@ -123,6 +128,10 @@ struct thread
     struct file *fd_table[FD_MAX];      /**File descriptor array */
     int     next_fd;                    /**Next file descriptor id */
     tid_t   parent_id;                  /**Parent tid */
+    struct file *executable;            /**executable file of this thread. 
+					   The file is remained open to 
+					   deny write while executing. It is
+					   closed when process exits.*/
     struct list child_list;             /**List of children  */
     struct semaphore sema_load;         /**Event indicator of child loaded */
     struct process *process;            /**process info used to communicate 

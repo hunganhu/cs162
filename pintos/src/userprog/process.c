@@ -64,7 +64,9 @@ process_execute (const char *file_name)
   tid = thread_create (process_name, PRI_DEFAULT, start_process, fn_copy);
   //  printf("[%s] in process_execute(fork %d), sema_down(load).\n", cur->name, (int)tid);
   sema_down(&cur->sema_load);
+
   struct process *my_child = process_child(&cur->child_list, tid);
+
   if (tid == TID_ERROR || !my_child->is_loaded) {
     tid = TID_ERROR;
     palloc_free_page (fn_copy);
@@ -267,14 +269,13 @@ process_wait (tid_t child_tid UNUSED)
   //  printf("[%s] in process_wait(%d).\n", cur->name, child_tid);
   //  dumpchildlist (cur);
   //  printf("[%s] in find child(%d).\n", cur->name, child_tid);
-  if (list_empty (&cur->child_list))
+  my_child = process_child(&cur->child_list, child_tid);
+  if (my_child == NULL)
     is_mychild = false;
-  else {
-    my_child = process_child(&cur->child_list, child_tid);
+  else
     is_mychild = true;
-  }
 
-  //  if (is_alived)
+  //  if (is_mychild)
   //    printf("is_alived=%d, my_child=%d, is_waited=%d, is_exited=%d.\n",
   //	   is_alived, is_mychild, my_child->is_waited, my_child->is_exited);
 
@@ -325,11 +326,11 @@ struct process * process_child (struct list *list, tid_t child_tid)
   struct list_elem *e;
 
   for (e = list_begin (list); 
-       e != list_end (list); e = list_next(e))
+       e != list_end (list); e = list_next(e)) {
     child = list_entry (e, struct process, child_elem);
-    if (child->pid == child_tid) {
+    if (child->pid == child_tid)
       return child;
-    }
+  }
   return NULL;
 }
 /* dump child_list of thread t */
@@ -388,24 +389,34 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  /**Free process info in child list */
+  struct list_elem *e;
+  struct list *list = &cur->child_list;
+
+  while (!list_empty (list)) {
+    e = list_pop_front (list);
+    palloc_free_page (list_entry (e, struct process, child_elem));
+  }
+
   /** Free all file descriptors */
   for (i = 2; i < cur->next_fd; i++)
     if (cur->fd_table[i] != NULL) {
       file_close(cur->fd_table[i]);
       cur->fd_table[i] = NULL;
     }
+  file_close (cur->executable);  // close this executable
 
   printf ("%s: exit(%d)\n", cur->name, cur->process->exit_code);
 
   //  printf("[%s] in process_exit(retrun %s).\n", cur->name, parent->name);
   if (parent != NULL) {
-    if (in_childlist(&parent->child_list))
-      if (cur->process->is_waited) {
-	//printf("[%s] in process_exit(up sema-wait).\n", cur->name);
-	sema_up (&cur->process->sema_wait);
-      } 
+    if (cur->process->is_waited) {
+      //printf("[%s] in process_exit(up sema-wait).\n", cur->name);
+      sema_up (&cur->process->sema_wait);
+    } 
   } else
-      palloc_free_page (cur->process);
+    palloc_free_page (cur->process);
 
 }
 
@@ -602,10 +613,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
   *eip = (void (*) (void)) ehdr.e_entry;
 
   success = true;
+  /* Deny write to executable. */
+  file_deny_write (file);
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  if (!success)
+    file_close (file);
+  else
+    t->executable = file;
   return success;
 }
 
