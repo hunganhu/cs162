@@ -290,7 +290,7 @@ process_wait (tid_t child_tid UNUSED)
 	//printf("[%s] in process_wait, remove child (%d).\n", cur->name, my_child->pid);
 	list_remove(&my_child->child_elem);
 	//	dumpchildlist (cur);
-	palloc_free_page(my_child);
+	free(my_child);
       } else {   // child is died
 	if (my_child->is_exited)  // exit normally
 	  success = my_child->exit_code;
@@ -299,7 +299,7 @@ process_wait (tid_t child_tid UNUSED)
 	//printf("[%s] in process_wait, remove dead child (%d).\n", cur->name, my_child->pid);
 	list_remove(&my_child->child_elem);
 	//	dumpchildlist (cur);
-	palloc_free_page(my_child);
+	free(my_child);
       }
     } // -1 for having been waited already
   } // -1 for not my child
@@ -396,7 +396,7 @@ process_exit (void)
 
   while (!list_empty (list)) {
     e = list_pop_front (list);
-    palloc_free_page (list_entry (e, struct process, child_elem));
+    free (list_entry (e, struct process, child_elem));
   }
 
   /** Free all file descriptors */
@@ -416,8 +416,7 @@ process_exit (void)
       sema_up (&cur->process->sema_wait);
     } 
   } else
-    palloc_free_page (cur->process);
-
+    free (cur->process);
 }
 
 /* Sets up the CPU for running user code in the current

@@ -46,7 +46,6 @@ syscall_handler (struct intr_frame *f UNUSED)
 {
   int syscall_no;
   uint32_t arg0, arg1, arg2, arg3;
-  struct thread *cur = thread_current();
 
   arg0 = read_argument(f, 0);
   syscall_no = (int) arg0;
@@ -292,12 +291,9 @@ static int sys_read (int fd, void *buffer, unsigned size)
   else {
     /* Get file info*/
     struct file *file_ = t->fd_table[fd];
-    off_t offset;
 
-    if (file_ != NULL) {
-      offset = file_tell(file_);
-      byte_read = file_read_at (file_, buffer, size, offset);
-    }
+    if (file_ != NULL)
+      byte_read = file_read (file_, buffer, size);
   }
   return byte_read;
 }
@@ -320,16 +316,9 @@ static int sys_write (int fd, const void *buffer, unsigned size)
   else {
     /* Get file info*/
     struct file *file_ = t->fd_table[fd];
-    off_t offset;
 
-    if (file_ != NULL) {
-      offset = file_->pos;
-      byte_written = file_write_at (file_, buffer, size, offset);
-      
-      /* Increment position within file for current thread */
-      if (byte_written > 0)
-	file_->pos += byte_written;
-    }
+    if (file_ != NULL)
+      byte_written = file_write (file_, buffer, size);
   }
   return byte_written;
 }

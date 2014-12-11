@@ -8,6 +8,7 @@
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
@@ -943,7 +944,7 @@ void init_process(struct thread *t)
   list_init (&t->child_list);
   sema_init (&t->sema_load, 0);
 
-  t->process = (struct process *) palloc_get_page(PAL_ZERO);
+  t->process = malloc(sizeof (struct process));
   ASSERT (t->process != NULL);
 
   t->process->is_exited = false;
