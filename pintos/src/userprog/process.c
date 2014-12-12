@@ -67,10 +67,12 @@ process_execute (const char *file_name)
 
   struct process *my_child = process_child(&cur->child_list, tid);
 
-  if (tid == TID_ERROR || !my_child->is_loaded) {
-    tid = TID_ERROR;
+  if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
-  }
+
+  if (!my_child->is_loaded)
+    tid = TID_ERROR;
+
   return tid;
 }
 
@@ -96,7 +98,8 @@ start_process (void *command_line_)
   if_.eflags = FLAG_IF | FLAG_MBS;
 
   /** get the number of arguments*/
-  command_line = malloc(strlen(command_line_) + 1); //length include '\0'
+  command_line = malloc (strlen(command_line_) + 1); //length include '\0'
+  //  printf("[%s] in start_process, malloc command_line(0x%08"PRIx32").\n", cur->name, (unsigned) command_line);
   strlcpy (command_line, command_line_, strlen(command_line_) + 1);
   for (token = strtok_r (command_line, delimiters, &save_ptr), argc = 0;
        token != NULL;
@@ -105,6 +108,7 @@ start_process (void *command_line_)
 
   /** get the arguments */
   argv = malloc (argc * sizeof(char *));
+  //  printf("[%s] in start_process, malloc argv(0x%08"PRIx32").\n", cur->name, (unsigned) argv);
   strlcpy (command_line, command_line_, strlen(command_line_) + 1);
   for (token = strtok_r (command_line, delimiters, &save_ptr), i = 0;
        token != NULL;
@@ -113,8 +117,18 @@ start_process (void *command_line_)
 
   success = load (argv[0], &if_.eip, &if_.esp);
 
+  /** Pass the argument to the top of user address space */
+  if (success)
+    status = argument_passing(argc, argv, &if_.esp);
+
+  /* If load failed, quit. */
+  palloc_free_page (command_line_);
+  //printf("[%s] in start_process, free(0x%08"PRIx32").\n", cur->name, (unsigned) argv);
+  free (argv);
+  //printf("[%s] in start_process, free(0x%08"PRIx32").\n", cur->name, (unsigned) command_line);
+  free (command_line);
+
   /** signal parent the loading is done */
-  //  lock_acquire (&userprog_lock);
   parent = get_thread (cur->parent_id);
   if (parent != NULL) {
     cur->process->is_loaded = success;
@@ -124,15 +138,7 @@ start_process (void *command_line_)
     //    dumpchildlist(parent);
     sema_up (&parent->sema_load);
   }
-  //  lock_release (&userprog_lock);
-  /** Pass the argument to the top of user address space */
-  if (success)
-    status = argument_passing(argc, argv, &if_.esp);
 
-  /* If load failed, quit. */
-  //  palloc_free_page (command_line_);
-  free(argv);
-  free(command_line);
   if (!success || !status) {
     cur->process->exit_code = -1;
     thread_exit ();
@@ -192,7 +198,8 @@ bool argument_passing (int argc, char **argv, void **esp)
   long padding;
 
   stack_top = *esp;
-  arg_addr = malloc(argc * sizeof (char *));
+  arg_addr = malloc (argc * sizeof (char *));
+  //  printf("In argument passing, malloc arg_addr(0x%08"PRIx32").\n", (unsigned) arg_addr);
   /**push arguments to *esp in reverse order*/
   for (i = argc - 1; i >= 0; i--) {
     arg_len = strlen (argv[i]);
@@ -226,6 +233,8 @@ bool argument_passing (int argc, char **argv, void **esp)
      true); */
   // initial stack pointer to new position
   *esp = stack_top;
+  //printf("In argument_passing, free arg_addr (0x%08"PRIx32").\n", (unsigned) arg_addr);
+  free (arg_addr);
 
   return success;
 }
@@ -285,21 +294,23 @@ process_wait (tid_t child_tid UNUSED)
 	my_child->is_waited = true;
 	//printf("[%s] in process_wait(%d) down sema_wait.\n", cur->name, child_tid);
 	//dumpchildlist (cur);
-	sema_down(&my_child->sema_wait);
+	sema_down (&my_child->sema_wait);
 	success = my_child->exit_code;
 	//printf("[%s] in process_wait, remove child (%d).\n", cur->name, my_child->pid);
-	list_remove(&my_child->child_elem);
-	//	dumpchildlist (cur);
-	free(my_child);
-      } else {   // child is died
+	list_remove (&my_child->child_elem);
+	//dumpchildlist (cur);
+	//printf("[%s] in process_wait, free my_child(0x%08"PRIx32").\n", cur->name, (unsigned) my_child);
+	free (my_child);
+      } else {   // child is dead
 	if (my_child->is_exited)  // exit normally
 	  success = my_child->exit_code;
 	else   // killed by external thread
 	  success = -1;
 	//printf("[%s] in process_wait, remove dead child (%d).\n", cur->name, my_child->pid);
-	list_remove(&my_child->child_elem);
-	//	dumpchildlist (cur);
-	free(my_child);
+	list_remove (&my_child->child_elem);
+	//dumpchildlist (cur);
+	//printf("[%s] in process_wait, free my_child(0x%08"PRIx32").\n", cur->name, (unsigned) my_child);
+	free (my_child);
       }
     } // -1 for having been waited already
   } // -1 for not my child
@@ -393,10 +404,12 @@ process_exit (void)
   /**Free process info in child list */
   struct list_elem *e;
   struct list *list = &cur->child_list;
-
+  struct process *child;
   while (!list_empty (list)) {
     e = list_pop_front (list);
-    free (list_entry (e, struct process, child_elem));
+    child = list_entry (e, struct process, child_elem);
+    //printf("[%s] in process_exit, free(0x%08"PRIx32").\n", cur->name, (unsigned) child);
+    free (child);
   }
 
   /** Free all file descriptors */
@@ -415,8 +428,10 @@ process_exit (void)
       //printf("[%s] in process_exit(up sema-wait).\n", cur->name);
       sema_up (&cur->process->sema_wait);
     } 
-  } else
+  } else {
+    //printf("[%s] in process_exit, free(0x%08"PRIx32").\n", cur->name, (unsigned) cur->process);
     free (cur->process);
+  }
 }
 
 /* Sets up the CPU for running user code in the current

@@ -944,7 +944,8 @@ void init_process(struct thread *t)
   list_init (&t->child_list);
   sema_init (&t->sema_load, 0);
 
-  t->process = malloc(sizeof (struct process));
+  t->process = malloc (sizeof (struct process));
+  //  printf("[%s] in init_process, malloc process(0x%08x).\n", t->name, (unsigned) t->process);
   ASSERT (t->process != NULL);
 
   t->process->is_exited = false;
