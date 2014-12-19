@@ -679,7 +679,6 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
-  //printf ("(thread_create)initial thread-(%s, %d).\n", t->name, t->priority);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -806,14 +805,6 @@ schedule (void)
   if (cur != next)
     prev = switch_threads (cur, next);
   thread_schedule_tail (prev);
-  /*
-  if (prev != NULL)
-    printf ("(schedule)cur=%s(pri=%d), prev=%s(pri=%d)).\n", cur->name, 
-	    cur->priority, prev->name, prev->priority);
-  else
-    printf ("(schedule)cur=%s(pri=%d), prev=NULL.\n", cur->name, 
-	    cur->priority);
-  */
 }
 
 /* Returns a tid to use for a new thread. */
@@ -945,7 +936,6 @@ void init_process(struct thread *t)
   sema_init (&t->sema_load, 0);
 
   t->process = malloc (sizeof (struct process));
-  //  printf("[%s] in init_process, malloc process(0x%08x).\n", t->name, (unsigned) t->process);
   ASSERT (t->process != NULL);
 
   t->process->is_exited = false;
