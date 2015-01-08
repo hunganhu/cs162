@@ -50,7 +50,6 @@ syscall_handler (struct intr_frame *f UNUSED)
   arg0 = read_argument(f, 0);
   syscall_no = (int) arg0;
 
-  //  printf("[%s] in syscall(%d).\n", cur->name, syscall_no);
   /* Synchronize syscall operation */
   //  lock_acquire (&syscall_lock);
   switch (syscall_no)
