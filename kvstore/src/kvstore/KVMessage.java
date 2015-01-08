@@ -16,6 +16,11 @@ import javax.xml.transform.*;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 
+import javax.xml.validation.Schema;            // For schema validation
+import javax.xml.validation.SchemaFactory; 
+import javax.xml.validation.Validator;
+import javax.xml.XMLConstants;
+
 import kvstore.xml.KVMessageType;
 import kvstore.xml.ObjectFactory;
 
@@ -80,7 +85,21 @@ public class KVMessage implements Serializable {
      */
     public KVMessage(Socket sock, int timeout) throws KVException {
         // implement me
-    }
+    	try {
+    		sock.setSoTimeout(timeout);
+    	    KVMessageType kvmType = (KVMessageType) unmarshal(sock.getInputStream());
+            this.msgType = kvmType.getType();
+            this.key = kvmType.getKey();
+            this.value = kvmType.getValue();
+            this.message = kvmType.getMessage();
+    	} 
+    	catch (IOException ex) {
+    		throw new KVException(KVConstants.ERROR_COULD_NOT_CONNECT);
+    	}
+        catch (JAXBException e) {
+            throw new KVException(KVConstants.ERROR_PARSER);
+        }
+     }
 
     /**
      * Constructs a KVMessage by copying another KVMessage.
@@ -89,6 +108,10 @@ public class KVMessage implements Serializable {
      */
     public KVMessage(KVMessage kvm) {
         // implement me
+        this.msgType = kvm.msgType;
+        this.key = kvm.key;
+        this.value = kvm.value;
+        this.message = kvm.message;
     }
 
     
@@ -103,7 +126,11 @@ public class KVMessage implements Serializable {
         ObjectFactory factory = new ObjectFactory();
         KVMessageType xmlStore = factory.createKVMessageType();
         //implement me
-        return factory.createKVMessage(xmlStore);
+        xmlStore.setKey(this.key);
+        xmlStore.setMessage(this.message);
+        xmlStore.setType(this.msgType);
+        xmlStore.setValue(this.value);
+    	return factory.createKVMessage(xmlStore);
     }
 
     /**
@@ -135,10 +162,28 @@ public class KVMessage implements Serializable {
      * @return KVMessageType from XML
      * @throws JAXBException
      */
-    private KVMessageType unmarshal(InputStream is) throws JAXBException {
-        JAXBContext jc = JAXBContext.newInstance(ObjectFactory.class);
-        Unmarshaller unmarshaller = jc.createUnmarshaller();
-        return ((JAXBElement<KVMessageType>)unmarshaller.unmarshal(new NoCloseInputStream(is))).getValue();
+    @SuppressWarnings("unchecked")
+    KVMessageType unmarshal(InputStream is) throws JAXBException {
+    	JAXBContext jc = JAXBContext.newInstance(ObjectFactory.class);
+    	Unmarshaller unmarshaller = jc.createUnmarshaller();
+    	return ((JAXBElement<KVMessageType>)unmarshaller.unmarshal(new NoCloseInputStream(is))).getValue();
+/*
+    	KVMessageType kvmType = null;
+        try {
+//            SchemaFactory factory = 
+//                    SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+//            Schema schema = factory.newSchema(new File(
+//        		System.getProperty("user.dir") + "xml/kvstore.xsd"));
+        	JAXBContext jc = JAXBContext.newInstance(ObjectFactory.class);
+            Unmarshaller unmarshaller = jc.createUnmarshaller();
+//            unmarshaller.setSchema(schema);
+            kvmType = (KVMessageType)unmarshaller.unmarshal(new NoCloseInputStream(is));
+        } catch (JAXBException e) {
+            System.out.println("Exception: "+e.getMessage());
+        }
+
+        return kvmType;
+        */
     }
 
     /**
@@ -169,6 +214,15 @@ public class KVMessage implements Serializable {
      */
     public void sendMessage(Socket sock) throws KVException {
         // implement me
+    	try {
+    		OutputStream os = sock.getOutputStream();
+    		marshalTo (os);
+    		sock.shutdownOutput();
+    	} catch (JAXBException jaxbe) {
+    		throw new KVException (jaxbe.getMessage());
+    	} catch (IOException ioe) {
+    		throw new KVException (ioe.getMessage());
+    	}
     }
 
     public String getKey() {

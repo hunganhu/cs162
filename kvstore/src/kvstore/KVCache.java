@@ -4,6 +4,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.ListIterator;
+
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBElement;
 import javax.xml.bind.JAXBException;
@@ -22,7 +26,10 @@ import kvstore.xml.ObjectFactory;
  * the eviction policy.
  */
 public class KVCache implements KeyValueInterface {
-
+	KVCacheType dataCache = new KVCacheType();
+	int numSets;
+	int maxElemsPerSet;
+	ArrayList<Lock> setLock = new ArrayList<Lock>();
     /**
      * Constructs a second-chance-replacement cache.
      *
@@ -31,7 +38,17 @@ public class KVCache implements KeyValueInterface {
      */
     @SuppressWarnings("unchecked")
     public KVCache(int numSets, int maxElemsPerSet) {
+    	this.numSets = numSets;
+    	this.maxElemsPerSet = maxElemsPerSet;
         // implement me
+    	
+    	for (int i = 0; i < numSets; i++) {
+    		KVSetType cacheSet = new KVSetType(); // initial a cache set
+    		cacheSet.getCacheEntry();            // initial empty array list of cache entry
+    		cacheSet.setId(String.valueOf(i));
+    		dataCache.getSet().add(i, cacheSet); // insert the cache set to arraylist [i]
+    		setLock.add(i, new ReentrantLock());
+    	}
     }
 
     /**
@@ -46,7 +63,20 @@ public class KVCache implements KeyValueInterface {
     @Override
     public String get(String key) {
         // implement me
-        return null;
+    	String value = null;
+
+    	int setId = getSetId(key);
+    	List<KVCacheEntry> set = dataCache.getSet().get(setId).getCacheEntry();
+    	ListIterator<KVCacheEntry> iter = set.listIterator();
+    	while (iter.hasNext()) {
+    		KVCacheEntry cacheEntry = iter.next();
+    		if (cacheEntry.getKey().equals(key)) {
+    			value = cacheEntry.getValue();
+    			cacheEntry.setIsReferenced("true");
+    			break;
+    		}
+    	}
+        return value;
     }
 
     /**
@@ -68,6 +98,47 @@ public class KVCache implements KeyValueInterface {
     @Override
     public void put(String key, String value) {
         // implement me
+    	int setId = getSetId(key);
+    	List<KVCacheEntry> set = dataCache.getSet().get(setId).getCacheEntry();
+    	int setSize = set.size();
+    	boolean found = false;
+    	ListIterator<KVCacheEntry> iter = set.listIterator();
+    	
+    	while (iter.hasNext()) {  // check valid key in cache
+    		KVCacheEntry cacheEntry = iter.next();
+    		if (cacheEntry.getKey().equals(key)) {
+    			cacheEntry.setValue(value);
+    			found = true;
+    			cacheEntry.setIsReferenced("false");
+    			break;
+    		}
+    	}
+    	
+    	if (!found) {  // the key is not in cache
+			KVCacheEntry cacheEntry = new KVCacheEntry();
+			cacheEntry.setKey(key);
+			cacheEntry.setValue(value);
+			cacheEntry.setIsReferenced("false");
+    		if (setSize < maxElemsPerSet) { // set is not full, append the new entry
+    			set.add(cacheEntry);
+    		} else {   // set is full
+    			// select eviction
+    			found = false;
+    	    	while (!found) {  
+    	    		for (int i = 0; i < setSize; i++) {
+    	    			if (set.get(i).getIsReferenced().equalsIgnoreCase("true")) {
+    	    				set.get(i).setIsReferenced("false");
+    	    			} else { // found evict entry
+    	    				found = true;
+    	    				set.remove(i);
+    	    				break;
+    	    			}
+    	    		}  // end of for loop
+    	    	} // end of while loop
+    			set.add(cacheEntry);
+    		} // end of if (setSize < maxElemsPerSet)
+    	} // end of if (!found)
+	
     }
 
     /**
@@ -80,7 +151,17 @@ public class KVCache implements KeyValueInterface {
     @Override
     public void del(String key) {
         // implement me
-    }
+    	int setId = getSetId(key);
+    	List<KVCacheEntry> set = dataCache.getSet().get(setId).getCacheEntry();
+    	ListIterator<KVCacheEntry> iter = set.listIterator();
+    	while (iter.hasNext()) {
+    		KVCacheEntry cacheEntry = iter.next();
+    		if (cacheEntry.getKey().equals(key)) {
+    			iter.remove();
+    			break;
+    		}
+    	}
+   }
 
     /**
      * Get a lock for the set corresponding to a given key.
@@ -92,9 +173,8 @@ public class KVCache implements KeyValueInterface {
      */
 
     public Lock getLock(String key) {
-    	return null;
     	//implement me
-
+    	return setLock.get(getSetId(key));
     }
     
     /**
@@ -104,7 +184,7 @@ public class KVCache implements KeyValueInterface {
      */
     int getCacheSetSize(int cacheSet) {
         // implement me
-        return -1;
+    	return dataCache.getSet().get(cacheSet).getCacheEntry().size();
     }
 
     private void marshalTo(OutputStream os) throws JAXBException {
@@ -120,6 +200,7 @@ public class KVCache implements KeyValueInterface {
         ObjectFactory factory = new ObjectFactory();
         KVCacheType xmlCache = factory.createKVCacheType();
             // implement me
+        xmlCache = dataCache;
         return factory.createKVCache(xmlCache);
     }
 
@@ -132,7 +213,7 @@ public class KVCache implements KeyValueInterface {
         try {
             marshalTo(os);
         } catch (JAXBException e) {
-            //e.printStackTrace();
+            e.printStackTrace();
         }
         return os.toString();
     }
@@ -140,5 +221,7 @@ public class KVCache implements KeyValueInterface {
     public String toString() {
         return this.toXML();
     }
-
+    private int getSetId(String key) {
+    	return Math.abs(key.hashCode()) % numSets;
+    }
 }

@@ -41,7 +41,11 @@ public class KVClient implements KeyValueInterface {
      */
     public Socket connectHost() throws KVException {
         // implement me
-        return null;
+    	try {
+    		return new Socket(server, port);
+    	} catch (IOException ex) {
+    		throw new KVException(ERROR_COULD_NOT_CONNECT);
+    	}
     }
 
     /**
@@ -52,6 +56,11 @@ public class KVClient implements KeyValueInterface {
      */
     public void closeHost(Socket sock) {
         // implement me
+    	try {
+    		sock.close();
+    	} catch (IOException ex) {
+    		// ignore error
+    	}
     }
 
     /**
@@ -63,6 +72,16 @@ public class KVClient implements KeyValueInterface {
     @Override
     public void put(String key, String value) throws KVException {
         // implement me
+    	Socket sock = connectHost();
+    	KVMessage request = new KVMessage (PUT_REQ);
+    	request.setKey(key);
+    	request.setValue(value);
+    	request.sendMessage(sock);
+    	KVMessage response = new KVMessage(sock);
+    	closeHost(sock);
+    	if (!response.getMsgType().equalsIgnoreCase(RESP) ||
+    			!response.getMessage().equalsIgnoreCase(SUCCESS))
+    		throw new KVException(response.getMessage());
     }
 
     /**
@@ -75,7 +94,16 @@ public class KVClient implements KeyValueInterface {
     @Override
     public String get(String key) throws KVException {
         // implement me
-        return null;
+    	Socket sock = connectHost();
+    	KVMessage request = new KVMessage (GET_REQ);
+    	request.setKey(key);
+    	request.sendMessage(sock);
+    	KVMessage response = new KVMessage(sock);
+    	closeHost(sock);
+    	if (!response.getMsgType().equalsIgnoreCase(RESP) ||
+    			response.getValue() == null)
+    		throw new KVException(KVConstants.ERROR_NO_SUCH_KEY);
+    	return response.getValue();
     }
 
     /**
@@ -87,7 +115,14 @@ public class KVClient implements KeyValueInterface {
     @Override
     public void del(String key) throws KVException {
         // implement me
+    	Socket sock = connectHost();
+    	KVMessage request = new KVMessage (DEL_REQ);
+    	request.setKey(key);
+    	request.sendMessage(sock);
+    	KVMessage response = new KVMessage(sock);
+    	closeHost(sock);
+    	if (!response.getMsgType().equalsIgnoreCase(RESP) ||
+    			!response.getMessage().equalsIgnoreCase(SUCCESS))
+    		throw new KVException(response.getMessage());
     }
-
-
-}
+}	

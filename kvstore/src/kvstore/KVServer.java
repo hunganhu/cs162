@@ -2,9 +2,10 @@ package kvstore;
 
 import static kvstore.KVConstants.ERROR_OVERSIZED_KEY;
 import static kvstore.KVConstants.ERROR_OVERSIZED_VALUE;
+import static kvstore.KVConstants.ERROR_NO_SUCH_KEY;
 import static kvstore.KVConstants.RESP;
 
-import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.*;
 
 /**
  * This class services all storage logic for an individual key-value server.
@@ -16,6 +17,7 @@ public class KVServer implements KeyValueInterface {
 
     private KVStore dataStore;
     private KVCache dataCache;
+    private ReentrantLock lock;
 
     private static final int MAX_KEY_SIZE = 256;
     private static final int MAX_VAL_SIZE = 256 * 1024;
@@ -42,6 +44,20 @@ public class KVServer implements KeyValueInterface {
     @Override
     public void put(String key, String value) throws KVException {
         // implement me
+    	if (key.length() > MAX_KEY_SIZE) 
+    		throw new KVException(ERROR_OVERSIZED_KEY);
+    	if (value.length() > MAX_VAL_SIZE) 
+    		throw new KVException(ERROR_OVERSIZED_VALUE);
+
+    	lock = (ReentrantLock) dataCache.getLock(key);
+    	try {
+        	lock.lock();
+    		dataCache.put(key, value);
+    		dataStore.put(key, value);
+    	} finally {
+    		if (lock.isHeldByCurrentThread())
+    			lock.unlock();
+    	}
     }
 
     /**
@@ -55,8 +71,24 @@ public class KVServer implements KeyValueInterface {
     @Override
     public String get(String key) throws KVException {
         // implement me
-        return null;
+    	String value = null;
+    	lock = (ReentrantLock) dataCache.getLock(key);
+    	try {        // try to get in cache
+        	lock.lock();
+    		value = dataCache.get(key);
+        	if (value == null) { // cache miss
+        		value = dataStore.get(key);
+        	}
+        	dataCache.put(key, value); // update cache if the key exists in store
+    	} catch (KVException kve) { //back store miss
+    		throw kve;
+    	} finally {
+    		if (lock.isHeldByCurrentThread())
+    			lock.unlock();
+    	}
+    	return value;
     }
+
 
     /**
      * Performs del request.
@@ -67,6 +99,20 @@ public class KVServer implements KeyValueInterface {
     @Override
     public void del(String key) throws KVException {
         // implement me
+    	if (key.length() > MAX_KEY_SIZE) 
+    		throw new KVException(ERROR_OVERSIZED_KEY);
+    	lock = (ReentrantLock) dataCache.getLock(key);
+    	try {
+    		lock.lock();
+    		dataCache.del(key);
+    		dataStore.del(key);
+    	} catch (KVException kve) {
+    		throw kve;
+    	} finally {
+    		if (lock.isHeldByCurrentThread())
+    			lock.unlock();
+    	}
+
     }
 
     /**
@@ -79,7 +125,13 @@ public class KVServer implements KeyValueInterface {
      */
     public boolean hasKey(String key) {
         // implement me
-        return false;
+    	try {
+    		if (dataStore.get(key) != null)
+    			return true;
+    	} catch (KVException kve) {
+    		return false;
+    	}
+    	return false;
     }
 
     /** This method is purely for convenience and will not be tested. */

@@ -1,8 +1,11 @@
 package kvstore;
 
+import static kvstore.KVConstants.ERROR_COULD_NOT_CONNECT;
 import static kvstore.KVConstants.ERROR_NO_SUCH_KEY;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.File;
 import java.io.OutputStream;
 import java.util.Map.Entry;
@@ -13,6 +16,7 @@ import javax.xml.bind.JAXBElement;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
+
 import kvstore.xml.KVPairType;
 import kvstore.xml.KVStoreType;
 import kvstore.xml.ObjectFactory;
@@ -100,11 +104,13 @@ public class KVStore implements KeyValueInterface {
         marshaller.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, false);
         marshaller.marshal(getXMLRoot(), os);
     }
-    
+    @SuppressWarnings("unchecked")
     private KVStoreType unmarshal(File f) throws JAXBException {
         JAXBContext context = JAXBContext.newInstance(ObjectFactory.class);
         Unmarshaller unmarshaller = context.createUnmarshaller();
-        KVStoreType xmlStore = ((JAXBElement<KVStoreType>) unmarshaller.unmarshal(f)).getValue();
+//        KVStoreType xmlStore = ((JAXBElement<KVStoreType>) unmarshaller.unmarshal(f)).getValue();
+        JAXBElement<KVStoreType> se = (JAXBElement<KVStoreType>)unmarshaller.unmarshal(f);
+        KVStoreType xmlStore = (KVStoreType) se.getValue();
         return xmlStore;
     }
 
@@ -135,6 +141,15 @@ public class KVStore implements KeyValueInterface {
      */
     public void dumpToFile(String fileName) {
         // implement me
+    	FileOutputStream fos;
+		try {
+			fos = new FileOutputStream(fileName);
+	    	marshalTo(fos);
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} catch (JAXBException jaxbe) {
+			jaxbe.printStackTrace();
+		}
     }
 
     /**
@@ -149,5 +164,11 @@ public class KVStore implements KeyValueInterface {
         resetStore();
 
         // implement me
+        try {
+			unmarshal(new File(fileName));
+		} catch (JAXBException jaxbe) {
+			jaxbe.printStackTrace();
+		}
+        
     }
 }
