@@ -23,6 +23,33 @@ public class TPCSlaveInfo {
      */
     public TPCSlaveInfo(String info) throws KVException {
         // implement me
+    	String [] part1;   // split to SlaveServerID and host:port
+    	String [] part2; // split to host and port
+
+    	try {
+    		if (info.isEmpty())
+           		throw new KVException(KVConstants.ERROR_INVALID_FORMAT);   			
+    		else 
+    			part1 = info.split("@");
+    		
+    		if (part1.length != 2)    			
+           		throw new KVException(KVConstants.ERROR_INVALID_FORMAT);   			
+    		else
+    			part2 = part1[1].split(":");
+
+    		if (part2.length != 2) {    			
+           		throw new KVException(KVConstants.ERROR_INVALID_FORMAT);   			
+    		}
+    		
+    		slaveID = Long.parseLong(part1[0].trim());
+    		hostname = part2[0].trim();
+    		port = Integer.parseInt(part2[1].trim());
+        	if (hostname.length() == 0) {
+        		throw new KVException(KVConstants.ERROR_INVALID_FORMAT);
+        	}
+    	} catch (NumberFormatException nfe) {
+       		throw new KVException(KVConstants.ERROR_INVALID_FORMAT);   		
+    	}
     }
 
     public long getSlaveID() {
@@ -46,7 +73,19 @@ public class TPCSlaveInfo {
      */
     public Socket connectHost(int timeout) throws KVException {
         // implement me
-        return null;
+    	try {
+    		Socket sock = new Socket(hostname, port);
+    		sock.setSoTimeout(timeout);
+    		return sock;
+    	} catch (SocketTimeoutException ste) {
+    		throw new KVException(ERROR_SOCKET_TIMEOUT);
+    	} catch (IllegalArgumentException iae) {
+       		throw new KVException(ERROR_COULD_NOT_CREATE_SOCKET);    		
+    	} catch (UnknownHostException uhe) {
+       		throw new KVException(ERROR_COULD_NOT_CREATE_SOCKET);    		
+    	} catch (IOException ioe) {
+    		throw new KVException(ERROR_COULD_NOT_CONNECT);
+    	}
     }
 
     /**
@@ -57,5 +96,11 @@ public class TPCSlaveInfo {
      */
     public void closeHost(Socket sock) {
         // implement me
+    	try {
+    		sock.close();
+    	} catch (IOException ex) {
+    		// ignore error
+    	}
+
     }
 }

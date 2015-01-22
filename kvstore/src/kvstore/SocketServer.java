@@ -1,10 +1,15 @@
 package kvstore;
 
+import static kvstore.KVConstants.ERROR_COULD_NOT_CONNECT;
+import static kvstore.KVConstants.ERROR_COULD_NOT_CREATE_SOCKET;
+import static kvstore.KVConstants.ERROR_SOCKET_TIMEOUT;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.util.*;
 
 /**
@@ -72,9 +77,9 @@ public class SocketServer {
     		if (port == 0)
     			port = server.getLocalPort();
     		server.setReuseAddress(true);
-    	} catch (IOException e) {
-    		e.printStackTrace();
-    	}
+    	} catch (IOException ioe) {
+    		throw ioe;
+    	} 
     }
 
     /**
