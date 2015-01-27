@@ -10,6 +10,9 @@ public class TPCMaster {
 
     public int numSlaves;
     public KVCache masterCache;
+    public final SortedMap<Long, TPCSlaveInfo> slaves = 
+    		new TreeMap<Long, TPCSlaveInfo>();
+    private Lock lock;
 
     public static final int TIMEOUT = 3000;
 
@@ -32,8 +35,17 @@ public class TPCMaster {
      *
      * @param slave the slaveInfo to be registered
      */
-    public void registerSlave(TPCSlaveInfo slave) {
-        // implement me
+    public void registerSlave(TPCSlaveInfo slave) throws KVException {
+    	// implement me
+    	Long key = new Long(slave.getSlaveID());
+    	if (getNumRegisteredSlaves() < numSlaves) {
+    		if (!slaves.containsKey(key)) {
+    			slaves.put(key, slave);
+    		} else {
+    			slaves.remove(key);
+    			slaves.put(key, slave);
+    		}
+    	}
     }
 
     /**
@@ -84,7 +96,14 @@ public class TPCMaster {
      */
     public TPCSlaveInfo findFirstReplica(String key) {
         // implement me
-        return null;
+    	Long hashkey = new Long(hashTo64bit(key));
+    	
+        if (slaves.isEmpty()) {
+            return null;
+        }
+        SortedMap<Long, TPCSlaveInfo> tailMap = slaves.tailMap(hashkey); // include hashkey
+        hashkey = tailMap.isEmpty() ? slaves.firstKey() : tailMap.firstKey();
+        return slaves.get(hashkey);
     }
 
     /**
@@ -95,7 +114,11 @@ public class TPCMaster {
      */
     public TPCSlaveInfo findSuccessor(TPCSlaveInfo firstReplica) {
         // implement me
-        return null;
+    	Long hashkey = new Long(firstReplica.getSlaveID());
+        SortedMap<Long, TPCSlaveInfo> tailMap = 
+        		((TreeMap <Long, TPCSlaveInfo>) slaves).tailMap(hashkey, false); //exclude hashkey
+        hashkey = tailMap.isEmpty() ? slaves.firstKey() : tailMap.firstKey();
+        return slaves.get(hashkey);
     }
 
     /**
@@ -103,7 +126,7 @@ public class TPCMaster {
      */
     public int getNumRegisteredSlaves() {
         // implement me
-        return -1;
+        return slaves.size();
     }
 
     /**
@@ -112,7 +135,7 @@ public class TPCMaster {
      */
     public TPCSlaveInfo getSlave(long slaveId) {
         // implement me
-        return null;
+    	return slaves.get(new Long(slaveId));
     }
 
     /**
@@ -129,6 +152,45 @@ public class TPCMaster {
     public synchronized void handleTPCRequest(KVMessage msg, boolean isPutReq)
             throws KVException {
         // implement me
+    	
+    	String value = null;
+    	String key = msg.getKey();
+		long hashkey = hashTo64bit(key);
+		TPCSlaveInfo slave1 = findFirstReplica(Long.toString(hashkey));
+		TPCSlaveInfo slave2 = findSuccessor(slave1);
+		KVMessage response1, response2;
+		KVMessage phase2;
+		if (isPutReq) {
+			value = msg.getValue();
+		}
+    	try {
+    		msg.sendMessage(slave1.connectHost(TIMEOUT));
+    		msg.sendMessage(slave2.connectHost(TIMEOUT));
+    		response1 = new KVMessage(slave1.connectHost(TIMEOUT));
+    		response2 = new KVMessage(slave2.connectHost(TIMEOUT));
+    		if (response1.getMsgType().equals(READY) &&
+    				response2.getMsgType().equals(READY)) {
+    			phase2 = new KVMessage(COMMIT);
+    			phase2.sendMessage(slave1.connectHost(TIMEOUT));
+    			phase2.sendMessage(slave2.connectHost(TIMEOUT));
+    		} else {
+    			phase2 = new KVMessage(ABORT);
+    			phase2.sendMessage(slave1.connectHost(TIMEOUT));
+    			phase2.sendMessage(slave2.connectHost(TIMEOUT));    			
+    		}
+    		response1 = new KVMessage(slave1.connectHost(TIMEOUT));
+    		response2 = new KVMessage(slave2.connectHost(TIMEOUT));
+    		if (response1.getMsgType().equals(ACK) &&
+    				response2.getMsgType().equals(ACK)) {   			
+    			if (isPutReq) {
+    				masterCache.put(key, value);
+    			} else {
+    				masterCache.del(key);
+    			}
+    		} 	
+    	} catch (KVException kve) { //back store miss
+    		throw kve;
+    	}
     }
 
     /**
@@ -145,9 +207,41 @@ public class TPCMaster {
      * @throws KVException with ERROR_NO_SUCH_KEY if unable to get
      *         the value from either slave for any reason
      */
-    public String handleGet(KVMessage msg) throws KVException {
-        // implement me
-        return null;
+    @SuppressWarnings("unused")
+	public String handleGet(KVMessage msg) throws KVException {
+    	// implement me
+    	KVMessage response;
+    	String value = null;
+    	String key = msg.getKey();
+    	lock = masterCache.getLock(key);
+    	try {        // try to get in cache
+    		lock.lock();
+    		value = masterCache.get(key);
+    		if (value == null) { // cache miss
+    			long hashkey = hashTo64bit(key);
+    			TPCSlaveInfo slave1 = findFirstReplica(Long.toString(hashkey));
+    			msg.sendMessage(slave1.connectHost(TIMEOUT));
+    			response = new KVMessage(slave1.connectHost(TIMEOUT), TIMEOUT);
+    			if (response == null) {
+    				TPCSlaveInfo slave2 = findSuccessor(slave1);
+    				msg.sendMessage(slave2.connectHost(TIMEOUT));
+    				response = new KVMessage(slave2.connectHost(TIMEOUT), TIMEOUT);
+    				if (response == null) {
+    					throw new KVException(KVConstants.ERROR_NO_SUCH_KEY);            		
+    				}        		
+    			}
+				if (!response.getMsgType().equalsIgnoreCase(RESP) ||
+						value == null) { // secondary failed
+					value = response.getValue();
+					masterCache.put(key, value); // update cache if the key exists in store
+				}
+    		}
+    	} catch (KVException kve) { //back store miss
+    		throw kve;
+    	} finally {
+    		lock.unlock();
+    	}
+    	return value;
     }
 
 }
