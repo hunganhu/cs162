@@ -101,6 +101,9 @@ public class TPCSlaveInfo {
     	} catch (IOException ex) {
     		// ignore error
     	}
-
+    }
+    
+    public String toString() {
+    	return new Long(slaveID).toString()+"@"+hostname+":"+port;
     }
 }

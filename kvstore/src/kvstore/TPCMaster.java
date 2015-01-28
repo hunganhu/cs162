@@ -158,38 +158,72 @@ public class TPCMaster {
 		long hashkey = hashTo64bit(key);
 		TPCSlaveInfo slave1 = findFirstReplica(Long.toString(hashkey));
 		TPCSlaveInfo slave2 = findSuccessor(slave1);
+		Socket socket1 = null;
+		Socket socket2 = null;
 		KVMessage response1, response2;
 		KVMessage phase2;
-		if (isPutReq) {
-			value = msg.getValue();
-		}
+		System.err.println("[Master] Message:" + msg.toString());
+
+		lock = masterCache.getLock(key);
     	try {
-    		msg.sendMessage(slave1.connectHost(TIMEOUT));
-    		msg.sendMessage(slave2.connectHost(TIMEOUT));
-    		response1 = new KVMessage(slave1.connectHost(TIMEOUT));
-    		response2 = new KVMessage(slave2.connectHost(TIMEOUT));
+    		lock.lock();
+    		if (isPutReq) {
+    			value = msg.getValue();
+    		}
+    		// phase 1 begins
+    		socket1 = slave1.connectHost(TIMEOUT);
+    		socket2 = slave2.connectHost(TIMEOUT);
+    		System.err.println("[Master] Send msg to slave1:" + slave1.toString());
+    		msg.sendMessage(socket1);
+    		System.err.println("[Master] Send msg to slave2:" + slave2.toString());
+    		msg.sendMessage(socket2);
+
+    		response1 = new KVMessage(socket1, TIMEOUT);
+    		System.err.println("[Master] Response from slave1:" + response1.toString());
+    		response2 = new KVMessage(socket2, TIMEOUT);
+    		System.err.println("[Master] Response from slave2:" + response2.toString());
+
+    		// phase 2 begins
+    		socket1 = slave1.connectHost(TIMEOUT);
+    		socket2 = slave2.connectHost(TIMEOUT);
+
     		if (response1.getMsgType().equals(READY) &&
     				response2.getMsgType().equals(READY)) {
     			phase2 = new KVMessage(COMMIT);
-    			phase2.sendMessage(slave1.connectHost(TIMEOUT));
-    			phase2.sendMessage(slave2.connectHost(TIMEOUT));
+        		System.err.println("[Master] Send commit to slave1.");
+    			phase2.sendMessage(socket1);
+        		System.err.println("[Master] Send commit to slave2.");
+    			phase2.sendMessage(socket2);
     		} else {
     			phase2 = new KVMessage(ABORT);
-    			phase2.sendMessage(slave1.connectHost(TIMEOUT));
-    			phase2.sendMessage(slave2.connectHost(TIMEOUT));    			
+        		System.err.println("[Master] Send abort to slave1.");
+    			phase2.sendMessage(socket1);
+        		System.err.println("[Master] Send abort to slave2.");
+    			phase2.sendMessage(socket2);    			
     		}
-    		response1 = new KVMessage(slave1.connectHost(TIMEOUT));
-    		response2 = new KVMessage(slave2.connectHost(TIMEOUT));
+    		response1 = new KVMessage(socket1, TIMEOUT);
+    		System.err.println("[Master] Response from slave1:" + response1.toString());
+    		response2 = new KVMessage(socket2, TIMEOUT);
+    		System.err.println("[Master] Response from slave2:" + response1.toString());
     		if (response1.getMsgType().equals(ACK) &&
     				response2.getMsgType().equals(ACK)) {   			
     			if (isPutReq) {
+    	    		System.err.println("[Master] Cache put key[" + key +"], value["+ value+"]");
     				masterCache.put(key, value);
     			} else {
+    	    		System.err.println("[Master] Cache del key[" + key +"]");
     				masterCache.del(key);
     			}
     		} 	
     	} catch (KVException kve) { //back store miss
     		throw kve;
+    	} finally {
+    		lock.unlock();
+    		if (slave1 != null)
+    			slave1.closeHost(socket1);
+    		if (slave2 != null)
+    			slave2.closeHost(socket2);
+
     	}
     }
 
@@ -211,6 +245,11 @@ public class TPCMaster {
 	public String handleGet(KVMessage msg) throws KVException {
     	// implement me
     	KVMessage response;
+		Socket socket1 = null;
+		Socket socket2 = null;
+		TPCSlaveInfo slave1 = null;
+		TPCSlaveInfo slave2 = null;
+		
     	String value = null;
     	String key = msg.getKey();
     	lock = masterCache.getLock(key);
@@ -219,13 +258,15 @@ public class TPCMaster {
     		value = masterCache.get(key);
     		if (value == null) { // cache miss
     			long hashkey = hashTo64bit(key);
-    			TPCSlaveInfo slave1 = findFirstReplica(Long.toString(hashkey));
-    			msg.sendMessage(slave1.connectHost(TIMEOUT));
-    			response = new KVMessage(slave1.connectHost(TIMEOUT), TIMEOUT);
+    			slave1 = findFirstReplica(Long.toString(hashkey));
+    			socket1 = slave1.connectHost(TIMEOUT);
+    			msg.sendMessage(socket1);
+    			response = new KVMessage(socket1);
     			if (response == null) {
-    				TPCSlaveInfo slave2 = findSuccessor(slave1);
-    				msg.sendMessage(slave2.connectHost(TIMEOUT));
-    				response = new KVMessage(slave2.connectHost(TIMEOUT), TIMEOUT);
+    				slave2 = findSuccessor(slave1);
+        			socket2 = slave2.connectHost(TIMEOUT);
+    				msg.sendMessage(socket2);
+    				response = new KVMessage(socket2);
     				if (response == null) {
     					throw new KVException(KVConstants.ERROR_NO_SUCH_KEY);            		
     				}        		
@@ -240,6 +281,10 @@ public class TPCMaster {
     		throw kve;
     	} finally {
     		lock.unlock();
+    		if (slave1 != null)
+    			slave1.closeHost(socket1);
+    		if (slave2 != null)
+    			slave2.closeHost(socket2);
     	}
     	return value;
     }

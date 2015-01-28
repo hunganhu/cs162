@@ -146,7 +146,9 @@ public class TPCLog {
 			} else if  (currMsgType.equals(KVConstants.ABORT)) {
 				if (prevEntry.getMsgType().equals(KVConstants.PUT_REQ)) {
 					// undo put, delete current key and restore the previous if existed.
-					kvServer.del(prevEntry.getKey());
+					if (prevEntry.getKey() != null) {
+						kvServer.del(prevEntry.getKey());
+					}
 					if (putKey != null) {
 						kvServer.put(putKey, putValue);        				
 					}
