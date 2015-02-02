@@ -169,23 +169,6 @@ public class KVMessage implements Serializable {
     	JAXBContext jc = JAXBContext.newInstance(ObjectFactory.class);
     	Unmarshaller unmarshaller = jc.createUnmarshaller();
     	return ((JAXBElement<KVMessageType>)unmarshaller.unmarshal(new NoCloseInputStream(is))).getValue();
-/*
-    	KVMessageType kvmType = null;
-        try {
-            SchemaFactory factory = 
-                    SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
-            Schema schema = factory.newSchema(new File(
-        		System.getProperty("user.dir") + "xml/kvstore.xsd"));
-        	JAXBContext jc = JAXBContext.newInstance(ObjectFactory.class);
-            Unmarshaller unmarshaller = jc.createUnmarshaller();
-            unmarshaller.setSchema(schema);
-            kvmType = (KVMessageType)unmarshaller.unmarshal(new NoCloseInputStream(is));
-        } catch (JAXBException e) {
-            System.out.println("Exception: "+e.getMessage());
-        }
-
-        return kvmType;
-        */
     }
 
     /**

@@ -65,7 +65,6 @@ public class TPCClientHandler implements NetworkHandler {
 			KVMessage response;
      		try {
     			request = new KVMessage(client);
-     			System.err.println("[Client] send:"+ request.toString());
     			response = new KVMessage(RESP);
     			if (request.getMsgType().equals(GET_REQ)) {
     				String value = master.handleGet(request);
@@ -85,7 +84,6 @@ public class TPCClientHandler implements NetworkHandler {
     		}
     		
     		try {
-     			System.err.println("[Client] resp:"+ response.toString());
         		response.sendMessage(client);
     		} catch (KVException kve) {
     			kve.printStackTrace();

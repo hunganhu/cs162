@@ -6,7 +6,7 @@ import org.junit.Test;
 
 public class TPCEndToEndTest extends TPCEndToEndTemplate {
 
-    @Test(timeout = 15000000)
+    @Test(timeout = 150000)
     public void testPutGet() throws KVException {
     	for (int i = 0; i < 100; i++) {
     		client.put("foo" + i, "bar");

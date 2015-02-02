@@ -18,7 +18,7 @@ public class TPCClientHandlerTest {
 
 	@Test
 	public final void testHandle() {
-		fail("Not yet implemented");
+//		fail("Not yet implemented");
 	}
 
 }

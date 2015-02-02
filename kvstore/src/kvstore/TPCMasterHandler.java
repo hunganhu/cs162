@@ -64,7 +64,6 @@ public class TPCMasterHandler implements NetworkHandler {
 			Socket sock = new Socket (masterHostname, REGISTERPORT);
 			String slaveInfo = Long.toString(slaveID) + "@" + 
 					server.getHostname() + ":" + server.getPort();
-			System.err.println("[Send register] Slave Info:"+ slaveInfo);
 			KVMessage request = new KVMessage(KVConstants.REGISTER, slaveInfo);
 			request.sendMessage(sock);
 			KVMessage response = new KVMessage(sock);
@@ -109,7 +108,6 @@ public class TPCMasterHandler implements NetworkHandler {
 			boolean isGetRequest = true;
 			try {
 				request = new KVMessage(master, TIMEOUT);
-				System.err.println("[Slave "+slaveID+" receive] Msg=" + request.toString());
 				if (!request.getMsgType().equals(GET_REQ)) {
 					isGetRequest = false;
 					phase1 = tpcLog.getLastEntry();
@@ -122,13 +120,11 @@ public class TPCMasterHandler implements NetworkHandler {
 					response.setKey(request.getKey());
 					response.setValue(value);
 				} else if (request.getMsgType().equals(PUT_REQ)) {
-					System.err.println("[Slave "+slaveID+" ] Put <" + request.getKey() +", "+ request.getValue() + ">");
 					if (request.getKey() == null || request.getKey().length() > 256)
 						response = new KVMessage(ABORT);
 					else
 						response = new KVMessage(READY);
 				} else if (request.getMsgType().equals(DEL_REQ)) {
-					System.err.println("[Slave "+slaveID+" ] Del <" + request.getKey() + ">");
 					if (request.getKey() == null || request.getKey().length() > 256)  // invalid key
 						response = new KVMessage(ABORT);
 					else if (!kvServer.hasKey(request.getKey()))  // key not exist
@@ -141,7 +137,6 @@ public class TPCMasterHandler implements NetworkHandler {
 					} else if (phase1.getMsgType().equals(KVConstants.DEL_REQ)) {
 						kvServer.del(phase1.getKey());
 					}					
-					System.err.println("Commit " + phase1.getMsgType());
 					response = new KVMessage(ACK);
 				} else if (request.getMsgType().equals(ABORT)) {
 					response = new KVMessage(ACK);
@@ -149,7 +144,6 @@ public class TPCMasterHandler implements NetworkHandler {
 					response = new KVMessage(RESP, "Data Error: Invalid Message Type");
 				}
 			} catch (KVException kve) {
-				// System.err.println("[Slave "+slaveID+" receive] Msg=" + request.toString());
 				if (isGetRequest)
 					response = new KVMessage(RESP, kve.getMessage());
 				else
@@ -158,7 +152,6 @@ public class TPCMasterHandler implements NetworkHandler {
 
 
 			try {
-				System.err.println("[Slave "+slaveID+" return] Msg=" + response.toString());
 				response.sendMessage(master);
 			} catch (KVException kve) {
 				kve.printStackTrace();

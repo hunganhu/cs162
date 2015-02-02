@@ -77,8 +77,6 @@ public class KVServer implements KeyValueInterface {
     		throw new KVException(ERROR_INVALID_KEY);
     	else if (key.length() > MAX_KEY_SIZE) 
     		throw new KVException(ERROR_OVERSIZED_KEY);
-    	if (!hasKey(key)) 
-    		throw new KVException(ERROR_NO_SUCH_KEY);
     	
     	String value = null;
     	lock = (ReentrantLock) dataCache.getLock(key);
@@ -89,8 +87,6 @@ public class KVServer implements KeyValueInterface {
         		value = dataStore.get(key);
         	}
         	dataCache.put(key, value); // update cache if the key exists in store
-    	} catch (KVException kve) { //back store miss
-    		throw kve;
     	} finally {
     		if (lock.isHeldByCurrentThread())
     			lock.unlock();
@@ -113,16 +109,12 @@ public class KVServer implements KeyValueInterface {
     	else if (key.length() > MAX_KEY_SIZE) 
     		throw new KVException(ERROR_OVERSIZED_KEY);
     	
-    	if (!hasKey(key)) 
-    		throw new KVException(ERROR_NO_SUCH_KEY);
     	
     	lock = (ReentrantLock) dataCache.getLock(key);
     	try {
     		lock.lock();
     		dataCache.del(key);
     		dataStore.del(key);
-    	} catch (KVException kve) {
-    		throw kve;
     	} finally {
     		if (lock.isHeldByCurrentThread())
     			lock.unlock();

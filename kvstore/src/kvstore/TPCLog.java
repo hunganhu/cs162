@@ -114,7 +114,6 @@ public class TPCLog {
 
 		for (int i = 0; i < entries.size(); i++) {
 			currEntry = entries.get(i);
-			System.err.println("[TPCLog] input: "+currEntry.toString());
 			String currMsgType = currEntry.getMsgType();
 			if (currMsgType.equals(KVConstants.PUT_REQ) ||
 					currMsgType.equals(KVConstants.DEL_REQ)) {
@@ -125,17 +124,14 @@ public class TPCLog {
 					phase1Entry != null) {
 				if (phase1Entry.getMsgType().equals(KVConstants.PUT_REQ)) {
 					kvServer.put(phase1Entry.getKey(), phase1Entry.getValue());
-					System.err.println("[TPCLog] rebuild: PUT("+phase1Entry.getKey()+","+phase1Entry.getValue()+")");
 				} else if (phase1Entry.getMsgType().equals(KVConstants.DEL_REQ)) {
 					kvServer.del(phase1Entry.getKey());					
-					System.err.println("[TPCLog] rebuild: DEL("+phase1Entry.getKey()+")");
 				}
 				phase1Entry = null;
 			} else if (currMsgType.equals(KVConstants.ABORT)) {
 				phase1Entry = null;
 			}
 		}
-		System.err.println("[TPCLog] rebuild done");
 	}
 
 }

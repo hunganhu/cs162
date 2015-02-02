@@ -206,7 +206,6 @@ public class TPCMurderDeathKillStud {
 
     public void checkBuild(){
         try{
-        	System.err.println("AssertTrue george=yiu");
             assertTrue(slave1.get("george").equals("yiu"));
         }
         catch (KVException e) {fail("Key 'george' not found on rebuild.");}
@@ -271,7 +270,6 @@ public class TPCMurderDeathKillStud {
         slaveRunners.put(name, slaveRunner);
 
         handler.registerWithMaster(InetAddress.getLocalHost().getHostAddress(), ss);
-        System.err.println("start Mock Slave End: "+name);
     }
 
     //Used to allow the spied log to recognize if the message is a phase 1 TPC.
@@ -306,7 +304,6 @@ public class TPCMurderDeathKillStud {
 
             Thread rebuild = new Thread(necromancer);
             try{Thread.sleep(2*TPCMaster.TIMEOUT);}catch (InterruptedException e){}
-            System.err.println("dieBeforeLog: ");
             rebuild.start();
             Thread.currentThread().stop(); //naughty. But it works
             System.out.println("don't get here");
@@ -323,7 +320,6 @@ public class TPCMurderDeathKillStud {
             try{inv.callRealMethod();}catch (Throwable e) { }//shouldn't happen
             Thread rebuild = new Thread(necromancer);
             try{Thread.sleep(2*TPCMaster.TIMEOUT);}catch (InterruptedException e){}
-            System.err.println("dieAfterLog: ");
             rebuild.start();
             Thread.currentThread().stop(); //naughty. But it works
             return null;
@@ -345,7 +341,6 @@ public class TPCMurderDeathKillStud {
 
         SocketServer ss = new SocketServer(InetAddress.getLocalHost().getHostAddress(), 0);
         KVServer slaveKvs = new KVServer(100, 10);
-        System.err.println("[necromancy] new TPCLog from "+oldLog);
         TPCLog log = spy(new TPCLog(oldLog, slaveKvs));
         spyLog = log;
         TPCMasterHandler handler = new TPCMasterHandler(slaveID, slaveKvs, log);
@@ -355,7 +350,6 @@ public class TPCMurderDeathKillStud {
         slaveRunner.start();
         slaveRunners.put(name, slaveRunner);
 
-		System.err.println("[necromancy] register:["+slaveID+"]"+InetAddress.getLocalHost().getHostAddress());
         handler.registerWithMaster(InetAddress.getLocalHost().getHostAddress(), ss);
     }
 
@@ -363,7 +357,6 @@ public class TPCMurderDeathKillStud {
         @Override
         public void run(){
             try{
-                System.err.println("Restart slave1: "+SLAVE1);
             	necromancy(SLAVE1, LOG);
             } catch (Exception e) {fail("COULD NOT REBUILD");}
         }
@@ -376,20 +369,15 @@ public class TPCMurderDeathKillStud {
     @Category(AG_PROJ4_CODE.class)
     @AGTestDetails(points = 2, desc = "Kills the slave during phase 1 after flushing PUT request to log and rebuilds. Checks that the PUT request was aborted.")
     public void testP1DeathAfterLog(){
-    	System.err.println("[TPCTest] start Mock Slave:" + SLAVE1);
         try{startMockSlave(SLAVE1, 1);} catch (Exception e) {fail("can't start slave");}
         try{
-        	System.err.println("[TPCTest] handle TPC request:" + p1Death.toString());
             master.handleTPCRequest(p1Death, true);
             fail("Shouldn't succeed");
         } catch (KVException e){
 
         }
-    	System.err.println("[TPCTest] checkBuild-1.");
         checkBuild();
-    	System.err.println("[TPCTest] checkBuild-1 END.");
         try{
-        	System.err.println("[TPCTest] slave1.get"+KEY1);
             slave1.get(KEY1);
             fail("Key was put when it should have failed.");
         }
@@ -399,7 +387,6 @@ public class TPCMurderDeathKillStud {
 
         //Verify log integrity by putting a key successfully, then killing and rebuilding slave.
         try{
-        	System.err.println("[TPCTest] handle TPC request:" + verify.toString());
             master.handleTPCRequest(verify,true);
             assertTrue(slave1.get("6666666666666666667").equals("demolition man"));
             verify(spyLog, atLeast(2)).appendAndFlush((KVMessage) anyObject());
@@ -407,11 +394,8 @@ public class TPCMurderDeathKillStud {
             fail("Put on live slave shouldn't fail");
         }
 
-    	System.err.println("[TPCTest] restart Slave:" + SLAVE1);
         try {necromancy(SLAVE1, LOG);} catch (Exception e) {fail("Could not rebuild slave.");}
-    	System.err.println("[TPCTest] checkBuild-2.");
         checkBuild();
-    	System.err.println("[TPCTest] checkBuild-2 END.");
         try{
             assertTrue(slave1.get("6666666666666666667").equals("demolition man"));
         } catch (KVException e){

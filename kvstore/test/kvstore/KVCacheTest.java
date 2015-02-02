@@ -252,6 +252,6 @@ public class KVCacheTest {
         assertEquals(cache.get("filling"), "c");
         cache.put("iris", "rocks!");
         assertEquals(cache.get("woah"), null);
-        System.out.println(cache.toXML());
+        //System.out.println(cache.toXML());
     }
 }
