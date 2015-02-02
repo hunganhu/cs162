@@ -37,6 +37,13 @@ static int sys_write (int, const void *, unsigned);
 static void sys_seek (int, unsigned);
 static int sys_tell (int);
 static void sys_close (int);
+static mapid_t sys_mmap (int, void *);
+static void sys_munmap (mapid_t);
+static bool sys_chdir (const char *);
+static bool sys_mkdir (const char *);
+static bool sys_readdir (int, char *);
+static bool sys_isdir (int);
+static int sys_isnumber (int);
 
 static int get_user (const uint8_t *);
 static bool put_user (uint8_t *, uint8_t);
@@ -114,15 +121,36 @@ syscall_handler (struct intr_frame *f UNUSED)
 
     /* Project 3 and optionally project 4. */
     case SYS_MMAP:                   /* Map a file into memory. */
+      arg1 = read_argument(f, 1);
+      arg2 = read_argument(f, 2);
+      f->eax = sys_mmap((int) arg1, (void *) arg2);
+      break;
     case SYS_MUNMAP:                 /* Remove a memory mapping. */
+      arg1 = read_argument(f, 1);
+      sys_munmap((mapid_t) arg1);
       break;
 
     /* Project 4 only. */
     case SYS_CHDIR:                  /* 15 Change the current directory. */
+      arg1 = read_argument(f, 1);
+      f->eax = sys_chdir((char *) arg1);
+      break;
     case SYS_MKDIR:                  /* Create a directory. */
+      arg1 = read_argument(f, 1);
+      f->eax = sys_mkdir((char *) arg1);
+      break;
     case SYS_READDIR:                /* Reads a directory entry. */
+      arg1 = read_argument(f, 1);
+      arg2 = read_argument(f, 2);
+      f->eax = sys_readdir((int) arg1, (char *) arg2);
+      break;
     case SYS_ISDIR:                  /* Tests if a fd represents a directory. */
+      arg1 = read_argument(f, 1);
+      f->eax = sys_isdir((int) arg1);
+      break;
     case SYS_INUMBER:                /* 19 Returns the inode number for a fd. */
+      arg1 = read_argument(f, 1);
+      f->eax = sys_isnumber((int) arg1);
       break;
     default:
       break;
@@ -371,6 +399,72 @@ static void sys_close (int fd)
   }
 }
 
+static mapid_t sys_mmap (int fd, void *buffer)
+{
+  /** verify parameters */
+  if (!access_ok (buffer, 0) || !valid_user_fd(fd)
+      || fd == STDIN_FILENO || fd == STDOUT_FILENO)
+    sys_exit(-1);
+
+  mapid_t mapid = -1;
+
+  return mapid;
+}
+
+static void sys_munmap (mapid_t mapid)
+{
+  /** verify parameters */
+  if (!valid_user_fd(mapid) || mapid == STDIN_FILENO || mapid == STDOUT_FILENO)
+    sys_exit(-1);
+}
+
+static bool sys_chdir (const char *dir)
+{
+  /** verify parameters */
+  if (!access_ok (dir, 0))
+    sys_exit(-1);
+
+  return false;
+}
+
+static bool sys_mkdir (const char *dir)
+{
+  /** verify parameters */
+  if (!access_ok (dir, 0))
+    sys_exit(-1);
+
+  return false;
+}
+
+static bool sys_readdir (int fd, char *name)
+{
+  /** verify parameters */
+  if (!access_ok (name, 0) || !valid_user_fd(fd)
+      || fd == STDIN_FILENO || fd == STDOUT_FILENO)
+    sys_exit(-1);
+
+  return false;
+}
+
+static bool sys_isdir (int fd)
+{
+  /** verify parameters */
+  if (!valid_user_fd(fd) || fd == STDIN_FILENO || fd == STDOUT_FILENO)
+    sys_exit(-1);
+
+  return false;
+}
+
+static int sys_isnumber (int fd)
+{
+  /** verify parameters */
+  if (!valid_user_fd(fd) || fd == STDIN_FILENO || fd == STDOUT_FILENO)
+    sys_exit(-1);
+
+  int inode = -1;
+
+  return inode;
+}
 
 /* Reads a byte at user virtual address UADDR.
    UADDR must be below PHYS_BASE.
