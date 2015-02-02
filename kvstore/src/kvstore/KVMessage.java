@@ -92,12 +92,12 @@ public class KVMessage implements Serializable {
             this.key = kvmType.getKey();
             this.value = kvmType.getValue();
             this.message = kvmType.getMessage();
-    	} 
-    	catch (IOException ex) {
-    		throw new KVException(KVConstants.ERROR_COULD_NOT_CONNECT);
-    	}
-        catch (JAXBException e) {
+     	} catch (SocketTimeoutException ste) {
+    		throw new KVException(KVConstants.ERROR_SOCKET_TIMEOUT);
+    	} catch (JAXBException e) {
             throw new KVException(KVConstants.ERROR_PARSER);
+    	} catch (IOException ex) {
+    		throw new KVException(KVConstants.ERROR_COULD_NOT_RECEIVE_DATA);
         }
      }
 
@@ -145,11 +145,9 @@ public class KVMessage implements Serializable {
         ByteArrayOutputStream os = new ByteArrayOutputStream();
         try {
             marshalTo(os);
-        }
-        catch (KVException e) {
+        } catch (KVException e) {
             throw new KVException(KVConstants.ERROR_INVALID_FORMAT);
-        }
-        catch (JAXBException e) {
+        } catch (JAXBException e) {
             throw new KVException(KVConstants.ERROR_PARSER);
         }
         return os.toString();
@@ -170,13 +168,13 @@ public class KVMessage implements Serializable {
 /*
     	KVMessageType kvmType = null;
         try {
-//            SchemaFactory factory = 
-//                    SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
-//            Schema schema = factory.newSchema(new File(
-//        		System.getProperty("user.dir") + "xml/kvstore.xsd"));
+            SchemaFactory factory = 
+                    SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+            Schema schema = factory.newSchema(new File(
+        		System.getProperty("user.dir") + "xml/kvstore.xsd"));
         	JAXBContext jc = JAXBContext.newInstance(ObjectFactory.class);
             Unmarshaller unmarshaller = jc.createUnmarshaller();
-//            unmarshaller.setSchema(schema);
+            unmarshaller.setSchema(schema);
             kvmType = (KVMessageType)unmarshaller.unmarshal(new NoCloseInputStream(is));
         } catch (JAXBException e) {
             System.out.println("Exception: "+e.getMessage());
@@ -219,9 +217,9 @@ public class KVMessage implements Serializable {
     		marshalTo (os);
     		sock.shutdownOutput();
     	} catch (JAXBException jaxbe) {
-    		throw new KVException (jaxbe.getMessage());
+    		throw new KVException (ERROR_PARSER);
     	} catch (IOException ioe) {
-    		throw new KVException (ioe.getMessage());
+    		throw new KVException (ERROR_COULD_NOT_SEND_DATA);
     	}
     }
 

@@ -1,9 +1,6 @@
 package kvstore;
 
-import static kvstore.KVConstants.ERROR_OVERSIZED_KEY;
-import static kvstore.KVConstants.ERROR_OVERSIZED_VALUE;
-import static kvstore.KVConstants.ERROR_NO_SUCH_KEY;
-import static kvstore.KVConstants.RESP;
+import static kvstore.KVConstants.*;
 
 import java.util.concurrent.locks.*;
 
@@ -44,8 +41,13 @@ public class KVServer implements KeyValueInterface {
     @Override
     public void put(String key, String value) throws KVException {
         // implement me
-    	if (key.length() > MAX_KEY_SIZE) 
+    	if (key == null || key.length() == 0) 
+    		throw new KVException(ERROR_INVALID_KEY);
+    	else if (key.length() > MAX_KEY_SIZE) 
     		throw new KVException(ERROR_OVERSIZED_KEY);
+    	
+    	if (value == null || value.length() == 0) 
+    		throw new KVException(ERROR_INVALID_VALUE);
     	if (value.length() > MAX_VAL_SIZE) 
     		throw new KVException(ERROR_OVERSIZED_VALUE);
 
@@ -71,6 +73,13 @@ public class KVServer implements KeyValueInterface {
     @Override
     public String get(String key) throws KVException {
         // implement me
+    	if (key == null || key.length() == 0) 
+    		throw new KVException(ERROR_INVALID_KEY);
+    	else if (key.length() > MAX_KEY_SIZE) 
+    		throw new KVException(ERROR_OVERSIZED_KEY);
+    	if (!hasKey(key)) 
+    		throw new KVException(ERROR_NO_SUCH_KEY);
+    	
     	String value = null;
     	lock = (ReentrantLock) dataCache.getLock(key);
     	try {        // try to get in cache
@@ -99,8 +108,14 @@ public class KVServer implements KeyValueInterface {
     @Override
     public void del(String key) throws KVException {
         // implement me
-    	if (key.length() > MAX_KEY_SIZE) 
+    	if (key == null || key.length() == 0) 
+    		throw new KVException(ERROR_INVALID_KEY);
+    	else if (key.length() > MAX_KEY_SIZE) 
     		throw new KVException(ERROR_OVERSIZED_KEY);
+    	
+    	if (!hasKey(key)) 
+    		throw new KVException(ERROR_NO_SUCH_KEY);
+    	
     	lock = (ReentrantLock) dataCache.getLock(key);
     	try {
     		lock.lock();

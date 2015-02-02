@@ -109,58 +109,33 @@ public class TPCLog {
 		loadFromDisk();
 
 		// implement me
-		KVMessage prevEntry = null;
+		KVMessage phase1Entry = null;
 		KVMessage currEntry = null;
-		String delKey = null;
-		String delValue = null;
-		String putKey = null;
-		String putValue = null;
 
 		for (int i = 0; i < entries.size(); i++) {
 			currEntry = entries.get(i);
+			System.err.println("[TPCLog] input: "+currEntry.toString());
 			String currMsgType = currEntry.getMsgType();
-			String currKey = currEntry.getKey();
-			String currValue = currEntry.getValue();
-			if (currMsgType.equals(KVConstants.PUT_REQ)) {
-				if (currKey != null) {
-					if (kvServer.hasKey(currKey)) {
-						putKey = currKey;
-						putValue = kvServer.get(currKey);
-					} else {
-						putKey = null;
-						putValue = null;
-					}
-					kvServer.put(currKey, currValue);
+			if (currMsgType.equals(KVConstants.PUT_REQ) ||
+					currMsgType.equals(KVConstants.DEL_REQ)) {
+				phase1Entry = currEntry;
+				continue;
+			}
+			if (currMsgType.equals(KVConstants.COMMIT) &&
+					phase1Entry != null) {
+				if (phase1Entry.getMsgType().equals(KVConstants.PUT_REQ)) {
+					kvServer.put(phase1Entry.getKey(), phase1Entry.getValue());
+					System.err.println("[TPCLog] rebuild: PUT("+phase1Entry.getKey()+","+phase1Entry.getValue()+")");
+				} else if (phase1Entry.getMsgType().equals(KVConstants.DEL_REQ)) {
+					kvServer.del(phase1Entry.getKey());					
+					System.err.println("[TPCLog] rebuild: DEL("+phase1Entry.getKey()+")");
 				}
-			} else if  (currMsgType.equals(KVConstants.DEL_REQ)) {
-				if (currKey != null) {
-					if (kvServer.hasKey(currKey)) {
-						delKey = currKey;
-						delValue = kvServer.get(currKey);
-					} else {
-						delKey = null;
-						delValue = null;
-					}
-					kvServer.del(currKey);
-				}
-			} else if  (currMsgType.equals(KVConstants.ABORT)) {
-				if (prevEntry.getMsgType().equals(KVConstants.PUT_REQ)) {
-					// undo put, delete current key and restore the previous if existed.
-					if (prevEntry.getKey() != null) {
-						kvServer.del(prevEntry.getKey());
-					}
-					if (putKey != null) {
-						kvServer.put(putKey, putValue);        				
-					}
-				} else if (prevEntry.getMsgType().equals(KVConstants.DEL_REQ)) {
-					// undo del, put the deleted entry if existed.
-					if (delKey != null) {
-						kvServer.put(delKey, delValue);        				
-					}
-				}
-			} // do nothing for COMMIT and GET requests
-			prevEntry = currEntry;
+				phase1Entry = null;
+			} else if (currMsgType.equals(KVConstants.ABORT)) {
+				phase1Entry = null;
+			}
 		}
+		System.err.println("[TPCLog] rebuild done");
 	}
 
 }

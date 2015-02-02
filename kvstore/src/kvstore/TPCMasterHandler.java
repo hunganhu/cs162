@@ -103,18 +103,15 @@ public class TPCMasterHandler implements NetworkHandler {
 			// Implement Me!
 			KVMessage request = null;
 			KVMessage response = null;
-			KVMessage undo = null;
-			
+			KVMessage phase1 = null;
+
 			boolean isGetRequest = true;
-			String originalKey = null;
-			String originalValue = null;
 			try {
-				request = new KVMessage(master);
-//				request = new KVMessage(master, TIMEOUT);
+				request = new KVMessage(master, TIMEOUT);
 				System.err.println("[Slave "+slaveID+" receive] Msg=" + request.toString());
 				if (!request.getMsgType().equals(GET_REQ)) {
 					isGetRequest = false;
-					undo = tpcLog.getLastEntry();
+					phase1 = tpcLog.getLastEntry();
 					tpcLog.appendAndFlush(request);
 				}
 
@@ -125,50 +122,28 @@ public class TPCMasterHandler implements NetworkHandler {
 					response.setValue(value);
 				} else if (request.getMsgType().equals(PUT_REQ)) {
 					System.err.println("[Slave "+slaveID+" ] Put <" + request.getKey() +", "+ request.getValue() + ">");
-					// keep current key-value pair in store
-					if (kvServer.hasKey(request.getKey())) {
-						originalKey = request.getKey();
-						originalValue = kvServer.get(originalKey);
-					} else {
-						originalKey = null;
-						originalValue = null;
-					}
-					kvServer.put(request.getKey(), request.getValue());
-					response = new KVMessage(READY);
+					if (request.getKey() == null || request.getKey().length() > 256)
+						response = new KVMessage(ABORT);
+					else
+						response = new KVMessage(READY);
 				} else if (request.getMsgType().equals(DEL_REQ)) {
 					System.err.println("[Slave "+slaveID+" ] Del <" + request.getKey() + ">");
-					// keep current key-value pair in store
-					if (kvServer.hasKey(request.getKey())) {
-						originalKey = request.getKey();
-						originalValue = kvServer.get(originalKey);
-					} else {
-						originalKey = null;
-						originalValue = null;
-					}
-					kvServer.del(request.getKey());
-					response = new KVMessage(READY);
+					if (request.getKey() == null || request.getKey().length() > 256)  // invalid key
+						response = new KVMessage(ABORT);
+					else if (!kvServer.hasKey(request.getKey()))  // key not exist
+						response = new KVMessage(ABORT, ERROR_NO_SUCH_KEY);						
+					else
+						response = new KVMessage(READY);
 				} else if (request.getMsgType().equals(COMMIT)) {
+					if (phase1.getMsgType().equals(KVConstants.PUT_REQ)) {
+						kvServer.put(phase1.getKey(), phase1.getValue());						
+					} else if (phase1.getMsgType().equals(KVConstants.DEL_REQ)) {
+						kvServer.del(phase1.getKey());
+					}					
+					System.err.println("Commit " + phase1.getMsgType());
 					response = new KVMessage(ACK);
 				} else if (request.getMsgType().equals(ABORT)) {
 					response = new KVMessage(ACK);
-					// undo the previous request
-					System.err.println("[Slave "+slaveID+" ] Undo Msg:" + undo.toString());
-					if (undo.getMsgType().equals(PUT_REQ)) {
-						System.err.println("[Slave "+slaveID+" ] Undo Put <" + undo.getKey() +", "+ undo.getValue() + ">");
-						// undo put
-						if (undo.getKey() != null) {
-							kvServer.del(undo.getKey());
-						}
-						if (originalKey != null) {
-							kvServer.put(originalKey, originalValue);;
-						}
-					} else if (undo.getMsgType().equals(DEL_REQ)) {
-						//undo del
-						System.err.println("[Slave "+slaveID+" ] Undo Del <" + undo.getKey() + ">");
-						if (originalKey != null) {
-							kvServer.put(originalKey, originalValue);;
-						}
-					}
 				} else {
 					response = new KVMessage(RESP, "Data Error: Invalid Message Type");
 				}
@@ -186,6 +161,12 @@ public class TPCMasterHandler implements NetworkHandler {
 				response.sendMessage(master);
 			} catch (KVException kve) {
 				kve.printStackTrace();
+			} finally {
+				try {
+					master.close();
+				} catch (Exception e) {
+					// ignore
+				}
 			}
 
 		}
