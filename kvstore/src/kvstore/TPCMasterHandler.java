@@ -64,6 +64,7 @@ public class TPCMasterHandler implements NetworkHandler {
 			Socket sock = new Socket (masterHostname, REGISTERPORT);
 			String slaveInfo = Long.toString(slaveID) + "@" + 
 					server.getHostname() + ":" + server.getPort();
+			System.err.println("[Send register] Slave Info:"+ slaveInfo);
 			KVMessage request = new KVMessage(KVConstants.REGISTER, slaveInfo);
 			request.sendMessage(sock);
 			KVMessage response = new KVMessage(sock);

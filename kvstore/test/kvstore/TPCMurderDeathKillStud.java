@@ -19,22 +19,38 @@ import autograder.AGCategories.AG_PROJ4_CODE;
 
 /* NOTES:
  * 
- * This class tests the behavior of your distributed Key Value store when slave servers asynchronously fail.
- * This is the student distribution. The tests provided are a SMALL SUBSET of the ones that will be used to grade your project. The setup is mostly the same.
- * We provide this file to you as a sanity check and to encourage you to test your own code. You may build off of this template if you'd like.
- * If your code fails this test, it may hang because it fails to rebuild and reregister. It should timeout and fail but it could just never finish.
+ * This class tests the behavior of your distributed Key Value store when slave 
+ * servers asynchronously fail. This is the student distribution. The tests 
+ * provided are a SMALL SUBSET of the ones that will be used to grade your 
+ * project. The setup is mostly the same. We provide this file to you as a 
+ * sanity check and to encourage you to test your own code. You may build off 
+ * of this template if you'd like. If your code fails this test, it may hang 
+ * because it fails to rebuild and reregister. It should timeout and fail but 
+ * it could just never finish.
  * 
- * The testing methods make extensive use of Mockito and the doAnswer methods. It is essentially equivalent to calling when() for void return types.
- * A lot of hacks went into making the tests behave the way I wanted them to. The comments should give you an idea of what's going on.
- * Slave deaths are simulated by starting a new thread that waits on a timer to revive the current slave before the slave has actually died. 
- * The slave essentially sets up its own respawn point before actually killing itself. This obviously doesn't happen in real systems.
+ * The testing methods make extensive use of Mockito and the doAnswer methods. 
+ * It is essentially equivalent to calling when() for void return types. A lot of
+ * hacks went into making the tests behave the way I wanted them to. The comments
+ * should give you an idea of what's going on. Slave deaths are simulated by 
+ * starting a new thread that waits on a timer to revive the current slave before
+ * the slave has actually died. The slave essentially sets up its own respawn 
+ * point before actually killing itself. This obviously doesn't happen in real 
+ * systems.
  * 
- * The method startMockSlave is used to construct slaves for this tests. It's a bit misleading in name as this test is effectively an END TO END test.
- * All servers, handlers, etc. are REAL classes implemented by you. The only mocking that happens on the slaves occurs in the methods dieAfterLog (and dieBeforeLog).
- * When I construct the TPCLog in startMockSlave, I SPY on it, meaning it's sort of partially mocked. All methods that don't have a stub defined for it will default to its REAL class defined method rather than returning null/doing nothing.
- * Depending on the arguments appendAndFlush are called with, it may exhibit a mocked behavior (i.e. self destructing the slave)
+ * The method startMockSlave is used to construct slaves for this tests. It's 
+ * a bit misleading in name as this test is effectively an END TO END test. All 
+ * servers, handlers, etc. are REAL classes implemented by you. The only mocking 
+ * that happens on the slaves occurs in the methods dieAfterLog (and dieBeforeLog).
+ * When I construct the TPCLog in startMockSlave, I SPY on it, meaning it's sort 
+ * of partially mocked. All methods that don't have a stub defined for it will 
+ * default to its REAL class defined method rather than returning null/doing 
+ * nothing. Depending on the arguments appendAndFlush are called with, it may 
+ * exhibit a mocked behavior (i.e. self destructing the slave)
  * 
- * As per usual, these tests don't come with any warranty and are presented as is. Meaning if you decide to base your own test cases off this setup and modify the file, there is no guarantee things will work as intended. Study the existing framework to increase your chances of success.
+ * As per usual, these tests don't come with any warranty and are presented as 
+ * is. Meaning if you decide to base your own test cases off this setup and 
+ * modify the file, there is no guarantee things will work as intended. Study 
+ * the existing framework to increase your chances of success.
  * 
  * This test file is part of the KVStore Project
  * (c) CS162 University of California, Berkeley
@@ -184,12 +200,13 @@ public class TPCMurderDeathKillStud {
         log.appendAndFlush(putNick);
         log.appendAndFlush(com);
 
-        //System.out.println("Finished flushing.");
+        System.out.println("Finished flushing.");
 
     }
 
     public void checkBuild(){
         try{
+        	System.err.println("AssertTrue george=yiu");
             assertTrue(slave1.get("george").equals("yiu"));
         }
         catch (KVException e) {fail("Key 'george' not found on rebuild.");}
@@ -254,6 +271,7 @@ public class TPCMurderDeathKillStud {
         slaveRunners.put(name, slaveRunner);
 
         handler.registerWithMaster(InetAddress.getLocalHost().getHostAddress(), ss);
+        System.err.println("start Mock Slave End: "+name);
     }
 
     //Used to allow the spied log to recognize if the message is a phase 1 TPC.
@@ -288,6 +306,7 @@ public class TPCMurderDeathKillStud {
 
             Thread rebuild = new Thread(necromancer);
             try{Thread.sleep(2*TPCMaster.TIMEOUT);}catch (InterruptedException e){}
+            System.err.println("dieBeforeLog: ");
             rebuild.start();
             Thread.currentThread().stop(); //naughty. But it works
             System.out.println("don't get here");
@@ -304,6 +323,7 @@ public class TPCMurderDeathKillStud {
             try{inv.callRealMethod();}catch (Throwable e) { }//shouldn't happen
             Thread rebuild = new Thread(necromancer);
             try{Thread.sleep(2*TPCMaster.TIMEOUT);}catch (InterruptedException e){}
+            System.err.println("dieAfterLog: ");
             rebuild.start();
             Thread.currentThread().stop(); //naughty. But it works
             return null;
@@ -325,7 +345,7 @@ public class TPCMurderDeathKillStud {
 
         SocketServer ss = new SocketServer(InetAddress.getLocalHost().getHostAddress(), 0);
         KVServer slaveKvs = new KVServer(100, 10);
-
+        System.err.println("[necromancy] new TPCLog from "+oldLog);
         TPCLog log = spy(new TPCLog(oldLog, slaveKvs));
         spyLog = log;
         TPCMasterHandler handler = new TPCMasterHandler(slaveID, slaveKvs, log);
@@ -335,32 +355,41 @@ public class TPCMurderDeathKillStud {
         slaveRunner.start();
         slaveRunners.put(name, slaveRunner);
 
+		System.err.println("[necromancy] register:["+slaveID+"]"+InetAddress.getLocalHost().getHostAddress());
         handler.registerWithMaster(InetAddress.getLocalHost().getHostAddress(), ss);
     }
 
     Runnable necromancer = new Runnable() {
         @Override
         public void run(){
-            try{necromancy(SLAVE1, LOG);}catch (Exception e) {fail("COULD NOT REBUILD");}
+            try{
+                System.err.println("Restart slave1: "+SLAVE1);
+            	necromancy(SLAVE1, LOG);
+            } catch (Exception e) {fail("COULD NOT REBUILD");}
         }
 
     };
 
     /* BEGIN TEST CASE*/
     
-    @Test(timeout = 30000)
+    @Test(timeout = 30000000)
     @Category(AG_PROJ4_CODE.class)
     @AGTestDetails(points = 2, desc = "Kills the slave during phase 1 after flushing PUT request to log and rebuilds. Checks that the PUT request was aborted.")
     public void testP1DeathAfterLog(){
+    	System.err.println("[TPCTest] start Mock Slave:" + SLAVE1);
         try{startMockSlave(SLAVE1, 1);} catch (Exception e) {fail("can't start slave");}
         try{
+        	System.err.println("[TPCTest] handle TPC request:" + p1Death.toString());
             master.handleTPCRequest(p1Death, true);
             fail("Shouldn't succeed");
         } catch (KVException e){
 
         }
+    	System.err.println("[TPCTest] checkBuild-1.");
         checkBuild();
+    	System.err.println("[TPCTest] checkBuild-1 END.");
         try{
+        	System.err.println("[TPCTest] slave1.get"+KEY1);
             slave1.get(KEY1);
             fail("Key was put when it should have failed.");
         }
@@ -370,6 +399,7 @@ public class TPCMurderDeathKillStud {
 
         //Verify log integrity by putting a key successfully, then killing and rebuilding slave.
         try{
+        	System.err.println("[TPCTest] handle TPC request:" + verify.toString());
             master.handleTPCRequest(verify,true);
             assertTrue(slave1.get("6666666666666666667").equals("demolition man"));
             verify(spyLog, atLeast(2)).appendAndFlush((KVMessage) anyObject());
@@ -377,8 +407,11 @@ public class TPCMurderDeathKillStud {
             fail("Put on live slave shouldn't fail");
         }
 
+    	System.err.println("[TPCTest] restart Slave:" + SLAVE1);
         try {necromancy(SLAVE1, LOG);} catch (Exception e) {fail("Could not rebuild slave.");}
+    	System.err.println("[TPCTest] checkBuild-2.");
         checkBuild();
+    	System.err.println("[TPCTest] checkBuild-2 END.");
         try{
             assertTrue(slave1.get("6666666666666666667").equals("demolition man"));
         } catch (KVException e){

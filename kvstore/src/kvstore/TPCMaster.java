@@ -42,17 +42,20 @@ public class TPCMaster {
 	public void registerSlave(TPCSlaveInfo slave) throws KVException {
 		// implement me
 		Long key = new Long(slave.getSlaveID());
+		System.err.println("[RegisterSlave] Slave info:["+ slave.getSlaveID() +"]"+slave.getHostname() +":" + slave.getPort());
 		lockSlave.lock();
 		try {
-			if (getNumRegisteredSlaves() < numSlaves) {
-				if (!slaves.containsKey(key)) {
-					slaves.put(key, slave);
-				} else {
-					slaves.remove(key);
-					slaves.put(key, slave);
-				}
+			if (slaves.containsKey(key)) {
+				System.err.println("[RegisterSlave] Update:["+ slave.getSlaveID() +"]"+slave.getHostname() +":" + slave.getPort());
+				slaves.remove(key);
+				slaves.put(key, slave);				
 			} else {
-				Full.signalAll();
+				if (getNumRegisteredSlaves() < numSlaves) {
+					System.err.println("[RegisterSlave] Insert:["+ slave.getSlaveID() +"]"+slave.getHostname() +":" + slave.getPort());
+					slaves.put(key, slave);					
+				} else {
+					Full.signalAll();
+				}
 			}
 		} finally {
 			lockSlave.unlock();
@@ -184,7 +187,7 @@ public class TPCMaster {
 		Socket socket2 = null;
 		KVMessage response1 = null;
 		KVMessage response2 = null;
-		KVMessage phase2 = null;
+		KVMessage decision = null;
 		System.err.println("[Master] Message:" + msg.toString());
 
 		lock = masterCache.getLock(key);
@@ -203,10 +206,10 @@ public class TPCMaster {
 				System.err.println("[Master] Response from slave1:" + response1.toString());
 			} catch (KVException kve) { //back store miss				
 				System.err.println("[Master-1] KVException:"+kve.getKVMessage().getMessage());
-				response1 = new KVMessage(ABORT);
+				response1 = new KVMessage(ABORT, kve.getKVMessage().getMessage());
 			} catch (Exception ex) { //back store miss
 				System.err.println("[Master-1] Exception:"+ex.getMessage());
-				response1 = new KVMessage(ABORT);
+				response1 = new KVMessage(ABORT, ex.getMessage());
 			} finally {
 				if (socket1 != null)
 					slave1.closeHost(socket1);
@@ -220,64 +223,78 @@ public class TPCMaster {
 				System.err.println("[Master] Response from slave2:" + response2.toString());
 			} catch (KVException kve) { //back store miss
 				System.err.println("[Master-2] KVException:"+kve.getKVMessage().getMessage());
-				response2 = new KVMessage(ABORT);
+				response2 = new KVMessage(ABORT, kve.getKVMessage().getMessage());
 			} catch (Exception ex) { //back store miss
 				System.err.println("[Master-2] Exception:"+ex.getMessage());
-				response2 = new KVMessage(ABORT);
+				response2 = new KVMessage(ABORT, ex.getMessage());
 			} finally {
 				if (socket2 != null)
 					slave2.closeHost(socket2);
 			}
 			if (response1.getMsgType().equals(READY) &&
 					response2.getMsgType().equals(READY)) {
-				phase2 = new KVMessage(COMMIT);
+				decision = new KVMessage(COMMIT);
+			} else if (!response1.getMsgType().equals(READY)){
+				decision = response1;
 			} else {
-				phase2 = new KVMessage(ABORT);
+				decision = response2;
 			}
 
 			// phase 2 begins
 			// acknowledge slave1
-			try {
-				socket1 = slave1.connectHost(TIMEOUT);
-				System.err.println("[Master] Acknowledge slave1 with " + phase2.getMsgType());
-				phase2.sendMessage(socket1);
-				response1 = new KVMessage(socket1, TIMEOUT);
-				System.err.println("[Master] Response from slave1:" + response1.toString());
-			} catch (KVException kve) { //back store miss
-				System.err.println("[Master-1] KVException:"+kve.getKVMessage().getMessage());
-				response1 = new KVMessage(ABORT);
-			} catch (Exception ex) { //back store miss
-				System.err.println("[Master-1] Exception:"+ex.getMessage());
-				response1 = new KVMessage(ABORT);
-			} finally {   		
-				if (socket1 != null)
-					slave1.closeHost(socket1);
-			}
+			do {
+				try {
+					socket1 = slave1.connectHost(TIMEOUT);
+					System.err.println("[Master] Acknowledge slave1 with " + decision.getMsgType());
+					decision.sendMessage(socket1);
+					response1 = new KVMessage(socket1, TIMEOUT);
+					System.err.println("[Master] Response from slave1:" + response1.toString());
+				} catch (KVException kve) { //back store miss
+					System.err.println("[Master-1] KVException:"+kve.getKVMessage().getMessage());
+					slave1 = findFirstReplica(Long.toString(hashkey));
+				} catch (Exception ex) { //back store miss
+					System.err.println("[Master-1] Exception:"+ex.getMessage());
+					slave1 = findFirstReplica(Long.toString(hashkey));
+				} finally {   		
+					if (socket1 != null)
+						slave1.closeHost(socket1);
+				}
+			} while (!response1.getMsgType().equals(ACK));
 			// acknowledge slave2
-			try {
-				socket2 = slave2.connectHost(TIMEOUT);
-				System.err.println("[Master] Acknowledge slave2 with " + phase2.getMsgType());
-				phase2.sendMessage(socket2);
-				response2 = new KVMessage(socket2, TIMEOUT);
-				System.err.println("[Master] Response from slave2:" + response1.toString());
-			} catch (KVException kve) { //back store miss
-				System.err.println("[Master-2] KVException:"+kve.getKVMessage().getMessage());
-				response2 = new KVMessage(ABORT);
-			} catch (Exception ex) { //back store miss
-				System.err.println("[Master-2] Exception:"+ex.getMessage());
-				response2 = new KVMessage(ABORT);
-			} finally {   		
-				if (socket2 != null)
-					slave2.closeHost(socket2);
-			}
+			do {
+				try {
+					System.err.println("[Master-2] Slave2 info:"+ slave2.getHostname() +":" + slave2.getPort());
+					socket2 = slave2.connectHost(TIMEOUT);
+					System.err.println("[Master] Acknowledge slave2 with " + decision.getMsgType());
+					decision.sendMessage(socket2);
+					response2 = new KVMessage(socket2, TIMEOUT);
+					System.err.println("[Master] Response from slave2:" + response1.toString());
+				} catch (KVException kve) { //back store miss
+					System.err.println("[Master-2] KVException:"+kve.getKVMessage().getMessage());
+					slave2 = findSuccessor(slave1);
+					System.err.println("[Master-2] refresh Slave2 info:"+ slave2.getHostname() +":" + slave2.getPort());
+				} catch (Exception ex) { //back store miss
+					System.err.println("[Master-2] Exception:"+ex.getMessage());
+					slave2 = findSuccessor(slave1);
+					System.err.println("[Master-2] refresh Slave2 info:"+ slave2.getHostname() +":" + slave2.getPort());
+				} finally {   		
+					if (socket2 != null)
+						slave2.closeHost(socket2);
+				}
+			} while (!response2.getMsgType().equals(ACK));
+
 			if (response1.getMsgType().equals(ACK) &&
-					response2.getMsgType().equals(ACK)) {   			
-				if (isPutReq) {
-					System.err.println("[Master] Cache put key[" + key +"], value["+ value+"]");
-					masterCache.put(key, value);
+					response2.getMsgType().equals(ACK)) {
+				if (decision.getMsgType().equals(COMMIT)) {
+					if (isPutReq) {
+						System.err.println("[Master] Cache put key[" + key +"], value["+ value+"]");
+						masterCache.put(key, value);
+					} else {
+						System.err.println("[Master] Cache del key[" + key +"]");
+						masterCache.del(key);
+					}
 				} else {
-					System.err.println("[Master] Cache del key[" + key +"]");
-					masterCache.del(key);
+					throw new KVException(decision);
 				}
 			} else {
 				System.err.println("throw abort exception.");
@@ -360,7 +377,8 @@ public class TPCMaster {
 				}
 			}
 		} catch (KVException kve) { //back store miss
-			throw kve;
+			System.err.println(kve.getKVMessage().getMessage());
+			//			throw kve;
 		} finally {
 			lock.unlock();
 			if (socket1 != null)

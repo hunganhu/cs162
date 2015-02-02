@@ -87,6 +87,10 @@ public class KVMessage implements Serializable {
         // implement me
     	try {
     		sock.setSoTimeout(timeout);
+    	} catch (java.net.SocketException se) {
+    		throw new KVException(KVConstants.ERROR_COULD_NOT_CREATE_SOCKET);
+    	}
+    	try {
     	    KVMessageType kvmType = (KVMessageType) unmarshal(sock.getInputStream());
             this.msgType = kvmType.getType();
             this.key = kvmType.getKey();

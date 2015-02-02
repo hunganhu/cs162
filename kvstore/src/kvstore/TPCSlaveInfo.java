@@ -79,9 +79,7 @@ public class TPCSlaveInfo {
     		return sock;
     	} catch (SocketTimeoutException ste) {
     		throw new KVException(ERROR_SOCKET_TIMEOUT);
-    	} catch (IllegalArgumentException iae) {
-       		throw new KVException(ERROR_COULD_NOT_CREATE_SOCKET);    		
-    	} catch (UnknownHostException uhe) {
+    	} catch (SocketException iae) {
        		throw new KVException(ERROR_COULD_NOT_CREATE_SOCKET);    		
     	} catch (IOException ioe) {
     		throw new KVException(ERROR_COULD_NOT_CONNECT);
