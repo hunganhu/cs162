@@ -5,6 +5,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <hash.h>
 #include "threads/synch.h"
 
 /* States in a thread's life cycle. */
@@ -137,7 +138,9 @@ struct thread
     struct process *process;            /**process info used to communicate 
 					   with parent */
 #endif
-
+#ifdef VM
+    struct hash *supplemental_pages;     /*supplemental hash pages*/
+#endif
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

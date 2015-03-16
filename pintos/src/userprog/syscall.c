@@ -162,15 +162,23 @@ syscall_handler (struct intr_frame *f UNUSED)
 static bool
 access_ok (const void * vaddr, unsigned size)
 {
-  struct thread *t = thread_current();
-  uint32_t *pd = t->pagedir;
+  //  struct thread *t = thread_current();
+  //  uint32_t *pd = t->pagedir;
 
   /* If the address exceeds PHYS_BASE, or address is not mapped,  exit -1 */
+  /*
   if (!is_user_vaddr (vaddr + size) ||
       !is_user_vaddr (vaddr) ||
       pagedir_get_page (pd, vaddr) == NULL || 
       pagedir_get_page (pd, vaddr + size) == NULL)
     return false;
+  */
+  if (!is_user_vaddr (vaddr + size) ||
+      !is_user_vaddr (vaddr))
+    return false;
+  get_user (vaddr);
+  if (size > 0)
+    get_user (vaddr + size);
 
   return true; 
 }

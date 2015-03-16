@@ -38,6 +38,11 @@
 #include "filesys/fsutil.h"
 #endif
 
+#ifdef VM
+#include "vm/frame.h"
+#include "vm/swap.h"
+#endif
+
 /* Page directory with kernel mappings only. */
 uint32_t *init_page_dir;
 
@@ -127,6 +132,11 @@ main (void)
   filesys_init (format_filesys);
 #endif
 
+#ifdef VM
+  frame_init ();
+  swap_init (); 
+#endif
+
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
@@ -175,11 +185,20 @@ paging_init (void)
         {
           pt = palloc_get_page (PAL_ASSERT | PAL_ZERO);
           pd[pde_idx] = pde_create (pt);
+	  /*
+	  printf("PD[%d]:ADDR= %'"PRIu32", FLAG= %'"PRIu32".\n", 
+		 pde_idx, pd_no((void *)pd[pde_idx]), 
+		 pg_ofs((void *)pd[pde_idx])); //DEBUG
+	  */
         }
 
       pt[pte_idx] = pte_create_kernel (vaddr, !in_kernel_text);
+      /*
+      printf("PT[%d]:ADDR= %'"PRIu32", FLAG= %'"PRIu32".\n", 
+	     pte_idx, pt_no((void *)pt[pte_idx]), 
+	     pg_ofs((void *)pt[pte_idx])); //DEBUG
+      */
     }
-  page = page + 0; // dummy statement for break point
   /* Store the physical address of the page directory into CR3
      aka PDBR (page directory base register).  This activates our
      new page tables immediately.  See [IA32-v2a] "MOV--Move

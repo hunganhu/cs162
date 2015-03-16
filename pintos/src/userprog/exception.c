@@ -5,6 +5,8 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -148,22 +150,28 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+// Check if the page fault is really present or the page is in the memory
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  if (!user) {
+  if (not_present && is_user_vaddr(fault_addr)) {
+    if (page_in (fault_addr)) {
+      return;
+    }
+    //At this point - invalid virtual address or page_in failed
+    struct thread *t = thread_current ();
+    t->process->exit_code = -1;
+    t->process->is_exited = false;
+    thread_exit ();    
+    return;
+  } else {
     printf ("Page fault at %p: %s error %s page in %s context.\n",
 	    fault_addr,
 	    not_present ? "not present" : "rights violation",
 	    write ? "writing" : "reading",
 	    user ? "user" : "kernel");
     kill (f);
-  } else {
-    struct thread *t = thread_current ();
-    t->process->exit_code = -1;
-    t->process->is_exited = false;
-    thread_exit ();
-  }
+  } 
 }
 

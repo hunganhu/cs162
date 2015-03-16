@@ -18,6 +18,10 @@
 #include "threads/malloc.h"  // added for alloc buffer for argv
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#ifdef VM
+#include "vm/frame.h"
+#include "vm/page.h"
+#endif
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -44,6 +48,7 @@ process_execute (const char *file_name)
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
+
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
@@ -261,7 +266,7 @@ process_wait (tid_t child_tid UNUSED)
 
   /** Parent  --+-------(Wait)-----------(Wait)----->
                 |
-      Child	+-----------------(End)-----------(End)
+      Child     +-----------------(End)-----------(End)
 
       Check 4 conditions:
       1. Is child_tid is my child?
@@ -519,6 +524,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+#ifdef VM
+  if (t->supplemental_pages == NULL) {
+    t->supplemental_pages = malloc (sizeof (struct hash));
+  }
+  if (t->supplemental_pages == NULL)
+    goto done;
+
+  hash_init (t->supplemental_pages, page_hash_value, page_hash_less, NULL);
+#endif
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
@@ -529,10 +543,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
-      || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
-      || ehdr.e_type != 2
-      || ehdr.e_machine != 3
-      || ehdr.e_version != 1
+      || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)    //ELFCLASS32-ELFDATA2LSB-EV_CURRENT
+      || ehdr.e_type != 2           //2:executable file
+      || ehdr.e_machine != 3        //3:Intel architecture
+      || ehdr.e_version != 1        //1:current version
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
@@ -691,6 +705,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
+  off_t file_ofs = ofs;
   file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
@@ -701,6 +716,17 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Get a page of memory. */
+#ifdef VM
+      struct page *page_entry = page_alloc(upage, writable);
+      if (page_entry == NULL) {
+	return false;
+      } else {
+	page_entry->file = file;
+	page_entry->file_ofs = file_ofs;
+	page_entry->read_bytes = page_read_bytes;
+	page_entry->zero_bytes = page_zero_bytes;
+      }
+#else
       uint8_t *kpage = palloc_get_page (PAL_USER);
       if (kpage == NULL)
         return false;
@@ -719,11 +745,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           palloc_free_page (kpage);
           return false; 
         }
+#endif
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      file_ofs += PGSIZE;
     }
   return true;
 }
@@ -733,10 +761,22 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  uint8_t *kpage;
   bool success = false;
 
+#ifdef VM
+  struct page *page_entry = page_alloc(((uint8_t *) PHYS_BASE) - PGSIZE, true);
+  if (page_entry != NULL) {
+    page_entry->file = NULL;
+    page_entry->file_ofs = 0;
+    page_entry->read_bytes = 0;
+    page_entry->zero_bytes = 0;
+    success = true;
+    *esp = PHYS_BASE;
+  } // else success = false as default
+#else
+  uint8_t *kpage;
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
@@ -745,6 +785,8 @@ setup_stack (void **esp)
       else
         palloc_free_page (kpage);
     }
+#endif
+
   return success;
 }
 
