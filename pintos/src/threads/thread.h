@@ -139,7 +139,8 @@ struct thread
 					   with parent */
 #endif
 #ifdef VM
-    struct hash *supplemental_pages;     /*supplemental hash pages*/
+    struct hash supplemental_pages;      /*supplemental hash pages*/
+    struct list mmap_list;               /*mmap file list*/
 #endif
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
@@ -153,8 +154,8 @@ extern bool thread_mlfqs;
 #ifdef USERPROG
 /** Lock used for syscall synchronization */
 struct lock syscall_lock;
-/** Lock used for update process info in thread */
-struct lock userprog_lock;
+/** Lock used for accessing file system */
+struct lock filesys_lock;
 #endif
 
 void thread_init (void);

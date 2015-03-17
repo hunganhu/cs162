@@ -2,23 +2,21 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include <stdio.h>
-#include <user/syscall.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
 #include "devices/shutdown.h"
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#ifdef VM
+#include "vm/frame.h"
+#include "vm/page.h"
+#endif
 
 static void syscall_handler (struct intr_frame *);
-
-void
-syscall_init (void) 
-{
-  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-}
 
 static bool access_ok (const void *, unsigned);
 static bool valid_user_fd (int);
@@ -47,6 +45,12 @@ static int sys_isnumber (int);
 
 static int get_user (const uint8_t *);
 static bool put_user (uint8_t *, uint8_t);
+
+void
+syscall_init (void) 
+{
+  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -79,55 +83,76 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CREATE:                 /* Create a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
+      lock_acquire (&filesys_lock);
        f->eax = sys_create((char *) arg1, (unsigned) arg2);
+      lock_release (&filesys_lock);
       break;
      case SYS_REMOVE:                 /* 5 Delete a file. */
       arg1 = read_argument(f, 1);
+      lock_acquire (&filesys_lock);
       f->eax = sys_remove((char *) arg1);
+      lock_release (&filesys_lock);
       break;
     case SYS_OPEN:                   /* Open a file. */
       arg1 = read_argument(f, 1);
+      lock_acquire (&filesys_lock);
       f->eax = sys_open((char *) arg1);
+      lock_release (&filesys_lock);
       break;
     case SYS_FILESIZE:               /* Obtain a file's size. */
       arg1 = read_argument(f, 1);
+      lock_acquire (&filesys_lock);
       f->eax = sys_filesize((int) arg1);
+      lock_release (&filesys_lock);
       break;
     case SYS_READ:                   /* Read from a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
       arg3 = read_argument(f, 3);
+      lock_acquire (&filesys_lock);
       f->eax = sys_read((int) arg1, (void *) arg2, (unsigned) arg3);
+      lock_release (&filesys_lock);
      break;
     case SYS_WRITE:                  /* Write to a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
       arg3 = read_argument(f, 3);
+      lock_acquire (&filesys_lock);
       f->eax = sys_write((int) arg1, (void *) arg2, (unsigned) arg3);
+      lock_release (&filesys_lock);
       break;
     case SYS_SEEK:                   /* 10 Change position in a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
+      lock_acquire (&filesys_lock);
       sys_seek((int) arg1, (unsigned) arg2);
+      lock_release (&filesys_lock);
       break;
     case SYS_TELL:                   /* Report current position in a file. */
       arg1 = read_argument(f, 1);
+      lock_acquire (&filesys_lock);
       f->eax = sys_tell((int) arg1);
       break;
     case SYS_CLOSE:                  /* Close a file. */
       arg1 = read_argument(f, 1);
+      lock_acquire (&filesys_lock);
       sys_close((int) arg1);
+      lock_release (&filesys_lock);
       break;
 
     /* Project 3 and optionally project 4. */
     case SYS_MMAP:                   /* Map a file into memory. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
+      lock_acquire (&filesys_lock);
       f->eax = sys_mmap((int) arg1, (void *) arg2);
+      lock_release (&filesys_lock);
       break;
     case SYS_MUNMAP:                 /* Remove a memory mapping. */
       arg1 = read_argument(f, 1);
+      lock_acquire (&filesys_lock);
       sys_munmap((mapid_t) arg1);
+      lock_release (&filesys_lock);
       break;
 
     /* Project 4 only. */
@@ -406,7 +431,23 @@ static void sys_close (int fd)
     t->fd_table[fd] = NULL;
   }
 }
+/**the algorithm is fairly similar to load executables.
+Note for implementation:
+1.You must load mapped pages lazily.
+2.The file size may not be a multiple of PGSIZE. In that case, you should
+  ignore the remaining bytes (ie. don't write them to the file)
+3.If the file gets evicted, write all modified pages to disk. When a process
+  exits, you must unmap all mapped files.
 
+A call to mmap may fail if 
+1.the file open as fd has a length of zero bytes. 
+2.addr is not page-aligned or 
+3.the range of pages mapped overlaps any existing set of mapped pages, including
+  the stack or pages mapped at executable load time. 
+4.addr is 0, because some Pintos code assumes virtual page 0 is not mapped.
+5.file descriptors 0 and 1, representing console input and output
+      
+ */
 static mapid_t sys_mmap (int fd, void *buffer)
 {
   /** verify parameters */
@@ -414,9 +455,71 @@ static mapid_t sys_mmap (int fd, void *buffer)
       || fd == STDIN_FILENO || fd == STDOUT_FILENO)
     sys_exit(-1);
 
-  mapid_t mapid = -1;
+  struct thread *t = thread_current();
+  struct file *file;
+  uint32_t read_bytes;        /*mmap file size*/
+  uint8_t *upage = buffer;    /* user virtual page start address*/
 
-  return mapid;
+  // check file existence
+  file = file_reopen(t->fd_table[fd]);
+  if (file == NULL)
+    return MAP_FAILED;
+
+  // check file length
+  read_bytes = file_length(file);
+
+  // check page aligned, buffer address, file size, and stack segment
+  if (pg_ofs(buffer) != 0 || buffer == NULL || read_bytes == 0 ||
+      (buffer >= PHYS_BASE - STACK_SIZE)) {
+    return MAP_FAILED;
+  }
+
+  // create a list element for thread's mmap list
+  struct mmap  *mmap = malloc (sizeof (struct mmap));
+  if (mmap == NULL)
+    return MAP_FAILED;
+  mmap->mmap_id  = fd;
+  mmap->file = file;
+  mmap->vaddr = buffer;
+  mmap->length = read_bytes;
+  list_push_back (&t->mmap_list, &mmap->map_elem);
+
+  off_t file_ofs = 0;
+  file_seek (file, file_ofs);
+  while (read_bytes > 0) {
+    /* Calculate how to fill this page.
+       We will read PAGE_READ_BYTES bytes from FILE
+       and zero the final PAGE_ZERO_BYTES bytes. */
+    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+    size_t page_zero_bytes = PGSIZE - page_read_bytes;
+    
+    /* check overlaps any existing set of mapped pages*/
+    struct page *vpage = page_lookup (t, upage);
+    if (vpage != NULL) {
+      sys_munmap (mmap->mmap_id);
+      return MAP_FAILED;
+    }
+    
+    /* Get a page of memory. */
+    struct page *page_entry = page_alloc(upage, true); // writable = true
+    if (page_entry == NULL) {
+      sys_munmap (mmap->mmap_id);
+      return MAP_FAILED;
+    } else {
+      page_entry->file = file;
+      page_entry->file_ofs = file_ofs;
+      page_entry->read_bytes = page_read_bytes;
+      page_entry->zero_bytes = page_zero_bytes;
+      page_entry->mmap_id = mmap->mmap_id;	
+    }
+    
+    /* Advance. */
+    read_bytes -= page_read_bytes;
+    upage += PGSIZE;
+    file_ofs += PGSIZE;
+  } 
+  
+  return mmap->mmap_id;
 }
 
 static void sys_munmap (mapid_t mapid)
@@ -424,6 +527,55 @@ static void sys_munmap (mapid_t mapid)
   /** verify parameters */
   if (!valid_user_fd(mapid) || mapid == STDIN_FILENO || mapid == STDOUT_FILENO)
     sys_exit(-1);
+
+  struct thread *t = thread_current();
+  struct list_elem *e;
+  struct mmap *mmap = NULL;
+
+  // search mmap struct for the corresponding mapid
+  for (e = list_begin (&t->mmap_list); e != list_end (&t->mmap_list); 
+       e = list_next (e)) {
+    mmap = list_entry (e, struct mmap, map_elem);
+    if (mmap->mmap_id == mapid)
+      break;
+  }
+  if (mmap == NULL)
+    return;
+
+  /*free thread's supplemental page table*/
+  uint8_t *upage = mmap->vaddr;
+  uint32_t read_bytes = mmap->length;
+
+  while (read_bytes > 0) {
+    /* Calculate how to fill this page. read PAGE_READ_BYTES bytes from FILE*/
+    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+    
+    /* check overlaps any existing set of mapped pages*/
+    struct page *vpage = page_lookup (t, upage);
+    if (vpage != NULL) {
+      if (vpage->frame != NULL) {
+	if (page_is_dirty(vpage)) {
+	  // write page content back to file
+	  //file_reopen (vpage->file);
+	  //file_seek (vpage->file, vpage->file_ofs);
+	  file_write_at (vpage->file, vpage->vaddr, vpage->read_bytes,
+			 vpage->file_ofs);
+	}
+      }
+      page_release(vpage);
+    }
+
+    /* Advance. */
+    read_bytes -= page_read_bytes;
+    upage += PGSIZE;
+   }
+
+  /*close file*/
+  file_close(mmap->file);
+
+  /*free thread's mmap_list*/
+  list_remove (&mmap->map_elem);
+  free (mmap);
 }
 
 static bool sys_chdir (const char *dir)

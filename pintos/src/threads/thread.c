@@ -20,6 +20,12 @@
 #endif
 #include "devices/timer.h"
 
+#ifdef VM
+#include <user/syscall.h>
+#include "vm/frame.h"
+#include "vm/page.h"
+#endif
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -121,7 +127,7 @@ thread_init (void)
   list_init (&lock_list);
 #ifdef USERPROG
   lock_init (&syscall_lock);
-  lock_init (&userprog_lock);
+  lock_init (&filesys_lock);
 #endif
 
   load_avg = 0;   /** initial system wide load average */
@@ -677,7 +683,7 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->all_locks);
 
 #ifdef VM
-  t->supplemental_pages = (struct hash *)NULL;
+  list_init(&t->mmap_list);
 #endif
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

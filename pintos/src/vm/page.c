@@ -1,6 +1,8 @@
 /* page.c
 */
 #include <string.h>
+#include <stdio.h>
+#include <inttypes.h>
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
@@ -10,6 +12,7 @@
 #include "userprog/pagedir.h"
 #include "vm/page.h"
 #include "vm/frame.h"
+#include "vm/swap.h"
 
 /* Returns a hash value for page p. */
 unsigned
@@ -38,7 +41,7 @@ page_lookup (struct thread *cur, void *vaddr)
   struct hash_elem *e;
 
   p.vaddr = vaddr;
-  e = hash_find (cur->supplemental_pages, &p.hash_elem);
+  e = hash_find (&cur->supplemental_pages, &p.hash_elem);
 
   return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
@@ -63,9 +66,10 @@ struct page *page_alloc (void *vaddr, bool writable)
   vpage->frame = NULL;
   vpage->private = false; // page source from file
   vpage->swap_sector = (block_sector_t) -1;
+  vpage->mmap_id = MAP_FAILED;
  
  /*insert into supplemental pages*/
-  hash_insert (cur->supplemental_pages, &vpage->hash_elem);
+  hash_insert (&cur->supplemental_pages, &vpage->hash_elem);
 
   return vpage;
 }
@@ -73,9 +77,12 @@ struct page *page_alloc (void *vaddr, bool writable)
 void page_release (struct page *vpage)
 {
   struct thread *cur = thread_current();
+  /** free frame table */
   if (vpage->frame != NULL)
     frame_release (vpage->frame);
-  hash_delete (cur->supplemental_pages, &vpage->hash_elem);
+
+  /** todo: free swap slots */
+  hash_delete (&cur->supplemental_pages, &vpage->hash_elem);
   free(vpage);
   /*delete page table entry in pagedir ?*/
 }
@@ -117,6 +124,9 @@ bool page_in (void *vaddr)
 
   if (vpage->private) {
     // do swap in
+    if (swap_in(vpage->swap_sector)) {
+      success = true;
+    }
   } else if (vpage->file == NULL) { 
     // for stack
     memset (vpage->frame->kpage, 0, PGSIZE);
@@ -143,7 +153,39 @@ bool page_in (void *vaddr)
 
 bool page_out (struct page *vpage)
 {
-  return false;
+  //check if the page frame is null
+  ASSERT (vpage->frame != NULL);
+  ASSERT (vpage->private == false);
+
+  bool success = false;
+  struct thread *t = thread_current();
+
+  if (page_is_dirty(vpage)) {
+    if (vpage->file == NULL) { 
+      // page source is stack
+      swap_out(vpage);
+      success = true;
+    } else if (vpage->file != NULL && vpage->mmap_id == MAP_FAILED){
+      // page source is file
+      swap_out(vpage);
+      success = true;
+    } else if (vpage->file != NULL && vpage->mmap_id != MAP_FAILED) {
+      //page source is mmap, write the dirty page to mmap file
+      file_reopen (vpage->file);
+      file_seek (vpage->file, vpage->file_ofs);
+      if (file_write_at (vpage->file, vpage->vaddr, vpage->read_bytes,
+			 vpage->file_ofs) != vpage->read_bytes) { 
+	success = false; 
+      } else {
+	pagedir_set_dirty (t->pagedir, vpage->vaddr, false);
+	success = true;
+      }
+    }
+    if (success)
+      pagedir_clear_page (t->pagedir, vpage->vaddr);
+    success = true;
+  }
+  return success;
 }
 
 bool page_is_accessed (struct page *vpage)
@@ -167,4 +209,20 @@ bool page_is_dirty (struct page *vpage)
   ASSERT (vpage->frame != NULL);
  
   return pagedir_is_dirty (vpage->thread->pagedir, vpage->vaddr);
+}
+
+/** hash action function used in hash_clear or hash_destroy */
+void page_destroy (struct hash_elem *e, void *aux UNUSED)
+{
+  struct page *pg = hash_entry (e, struct page, hash_elem);
+  //  printf("page =0x%08"PRIx32" {vaddr=0x%08"PRIx32", frame=0x%08"PRIx32"}\n",
+  //	 (unsigned)pg, (unsigned)pg->vaddr, (unsigned)pg->frame);
+
+  /** release frame table */
+  if (pg->frame != NULL)
+    frame_release (pg->frame);
+  //  printf("page =0x%08"PRIx32" {vaddr=0x%08"PRIx32", frame=0x%08"PRIx32"}\n",
+  //	 (unsigned)pg, (unsigned)pg->vaddr, (unsigned)pg->frame);
+  /** todo: free swap slots */
+  free (pg);
 }

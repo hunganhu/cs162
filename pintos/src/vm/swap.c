@@ -29,12 +29,12 @@ void swap_init(void)
   lock_init(&swap_lock);
 }
 
-bool swap_in(void)
+bool swap_in(block_sector_t swap_sector)
 {
   return false;
 }
 
-bool swap_out(void)
+block_sector_t swap_out(struct page *vpage)
 {
-  return false;
+  return -1;
 }

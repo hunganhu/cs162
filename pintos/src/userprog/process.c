@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -389,6 +390,19 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+#ifdef VMM
+  /** Free supplemental page table */
+  hash_destroy (&cur->supplemental_pages, page_destroy);
+  /** Free mmap list */
+  struct list_elem *le;
+  struct list *maplist = &cur->mmap_list;
+  struct mmap *mmap;
+  while (!list_empty (maplist)) {
+    le = list_pop_front (maplist);
+    mmap = list_entry (le, struct mmap, map_elem);
+    free (mmap);
+  }
+#endif
 
   /**Free process info in child list */
   struct list_elem *e;
@@ -525,13 +539,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
 #ifdef VM
-  if (t->supplemental_pages == NULL) {
-    t->supplemental_pages = malloc (sizeof (struct hash));
-  }
-  if (t->supplemental_pages == NULL)
-    goto done;
-
-  hash_init (t->supplemental_pages, page_hash_value, page_hash_less, NULL);
+  hash_init (&t->supplemental_pages, page_hash_value, page_hash_less, NULL);
 #endif
   /* Open executable file. */
   file = filesys_open (file_name);
