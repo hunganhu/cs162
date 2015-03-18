@@ -2,6 +2,8 @@
 #define VM_PAGE_H
 
 #include <hash.h>
+#include <stdint.h>
+#include <list.h>
 #include <user/syscall.h>
 #include "filesys/off_t.h"
 #include "devices/block.h"
@@ -9,6 +11,15 @@
 #define PINTOS_CODE_START 0x08048000           //PINTOS text segment start   
 #define STACK_SIZE (8 * 1024 * 1024)           //8 MB stack size
 #define CODE_BASE ((void *) PINTOS_CODE_START) //virtual address should above it
+
+struct mmap 
+{
+  mapid_t mmap_id;              /* mmap id, same as file fd */
+  struct file *file;            /* the file struct of memory map file */
+  uint8_t  *vaddr;              /* the start address of virtual memory */
+  uint32_t length;              /* the length of mmap file */
+  struct list_elem map_elem;    /* the element in thread's mmap list */
+};
 
 enum page_type 
   {
@@ -48,5 +59,7 @@ bool page_is_accessed (struct page *vpage);
 void page_set_accessed (struct page *vpage, bool accessed);
 bool page_is_dirty (struct page *vpage);
 void page_destroy (struct hash_elem *e, void *aux UNUSED);
+struct mmap *mmap_get_id(mapid_t mapid);
+void page_munmap (struct mmap *mmap);
 
 #endif /* vm/page.h */

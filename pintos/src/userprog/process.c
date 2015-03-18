@@ -373,6 +373,21 @@ process_exit (void)
   uint32_t *pd;
   struct thread *parent = get_thread(cur->parent_id);
   int i;
+
+#ifdef VM
+  /** Free mmap list */
+  struct list_elem *le;
+  struct list *maplist = &cur->mmap_list;
+  struct mmap *mmap;
+  while (!list_empty (maplist)) {
+    le = list_pop_front (maplist);
+    mmap = list_entry (le, struct mmap, map_elem);
+    page_munmap (mmap);
+    free (mmap);
+  }
+  /** Free supplemental page table */
+  hash_destroy (&cur->supplemental_pages, page_destroy);
+#endif
  
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -390,19 +405,6 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-#ifdef VMM
-  /** Free supplemental page table */
-  hash_destroy (&cur->supplemental_pages, page_destroy);
-  /** Free mmap list */
-  struct list_elem *le;
-  struct list *maplist = &cur->mmap_list;
-  struct mmap *mmap;
-  while (!list_empty (maplist)) {
-    le = list_pop_front (maplist);
-    mmap = list_entry (le, struct mmap, map_elem);
-    free (mmap);
-  }
-#endif
 
   /**Free process info in child list */
   struct list_elem *e;

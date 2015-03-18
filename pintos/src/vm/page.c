@@ -45,7 +45,9 @@ page_lookup (struct thread *cur, void *vaddr)
 
   return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
-
+/** allocate a page entry for vaddr, initialize the page values and  insert
+    into thread's supplemental page table.
+*/
 struct page *page_alloc (void *vaddr, bool writable)
 {
   struct page *vpage;
@@ -53,12 +55,14 @@ struct page *page_alloc (void *vaddr, bool writable)
   void *page_vaddr = pg_round_down(vaddr); /*the page vaddr is in*/
 
   vpage = page_lookup(cur, page_vaddr);
-  if (vpage == NULL) { /* vaddr not in current supplemental pages */
-    vpage = malloc (sizeof (struct page));
-    if (vpage == NULL) {
-      return NULL;
-    }
+  if (vpage != NULL)    /* vaddr is already in thread's supplemental pages */
+    return vpage;
+  /* vaddr not in current supplemental pages */
+  vpage = malloc (sizeof (struct page));
+  if (vpage == NULL) {
+    return NULL;
   }
+
   /*initial a new page entry */
   vpage->vaddr = page_vaddr;
   vpage->thread = cur;
@@ -225,4 +229,52 @@ void page_destroy (struct hash_elem *e, void *aux UNUSED)
   //	 (unsigned)pg, (unsigned)pg->vaddr, (unsigned)pg->frame);
   /** todo: free swap slots */
   free (pg);
+}
+
+struct mmap *mmap_get_id(mapid_t mapid) 
+{
+  struct thread *t = thread_current();
+  struct list_elem *e;
+  struct mmap *mmap = NULL;
+
+  // search mmap struct for the corresponding mapid
+  for (e = list_begin (&t->mmap_list); e != list_end (&t->mmap_list); 
+       e = list_next (e)) {
+    mmap = list_entry (e, struct mmap, map_elem);
+    if (mmap->mmap_id == mapid)
+      return mmap;
+  }
+  return NULL;
+}
+
+void page_munmap (struct mmap *mmap)
+{
+  /*free thread's supplemental page table*/
+  struct thread *t = thread_current();
+  uint8_t *upage = mmap->vaddr;
+  uint32_t read_bytes = mmap->length;
+
+  while (read_bytes > 0) {
+    /* Calculate how to fill this page. read PAGE_READ_BYTES bytes from FILE*/
+    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+    
+    /* check overlaps any existing set of mapped pages*/
+    struct page *vpage = page_lookup (t, upage);
+    if (vpage != NULL) {
+      if (vpage->frame != NULL) {
+	if (page_is_dirty(vpage)) {
+	  // write page content back to file
+	  //file_reopen (vpage->file);
+	  //file_seek (vpage->file, vpage->file_ofs);
+	  file_write_at (vpage->file, vpage->vaddr, vpage->read_bytes,
+			 vpage->file_ofs);
+	}
+      }
+      page_release(vpage);
+    }
+
+    /* Advance. */
+    read_bytes -= page_read_bytes;
+    upage += PGSIZE;
+   }
 }

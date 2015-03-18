@@ -36,6 +36,15 @@ pagedir_destroy (uint32_t *pd)
   for (pde = pd; pde < pd + pd_no (PHYS_BASE); pde++)
     if (*pde & PTE_P) 
       {
+#ifdef VM
+	/*Since all the physical frames are allocated in the frame table,
+	  to free a physical frame only set null to vpage in frame table entry.
+	  Here, only free the page directory and page table entries allocated
+	  from the pages in kernel pool.
+	*/
+        uint32_t *pt = pde_get_pt (*pde);
+        palloc_free_page (pt);
+#else
         uint32_t *pt = pde_get_pt (*pde);
         uint32_t *pte;
         
@@ -43,6 +52,7 @@ pagedir_destroy (uint32_t *pd)
           if (*pte & PTE_P) 
             palloc_free_page (pte_get_page (*pte));
         palloc_free_page (pt);
+#endif
       }
   palloc_free_page (pd);
 }

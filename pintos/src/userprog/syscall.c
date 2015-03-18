@@ -528,54 +528,16 @@ static void sys_munmap (mapid_t mapid)
   if (!valid_user_fd(mapid) || mapid == STDIN_FILENO || mapid == STDOUT_FILENO)
     sys_exit(-1);
 
-  struct thread *t = thread_current();
-  struct list_elem *e;
-  struct mmap *mmap = NULL;
+  struct mmap *mmap = mmap_get_id (mapid);
 
-  // search mmap struct for the corresponding mapid
-  for (e = list_begin (&t->mmap_list); e != list_end (&t->mmap_list); 
-       e = list_next (e)) {
-    mmap = list_entry (e, struct mmap, map_elem);
-    if (mmap->mmap_id == mapid)
-      break;
+  if (mmap != NULL) {
+    page_munmap (mmap);
+    /*close file*/
+    // file_close(mmap->file);
+    /*free thread's mmap_list*/
+    list_remove (&mmap->map_elem);
+    free (mmap);
   }
-  if (mmap == NULL)
-    return;
-
-  /*free thread's supplemental page table*/
-  uint8_t *upage = mmap->vaddr;
-  uint32_t read_bytes = mmap->length;
-
-  while (read_bytes > 0) {
-    /* Calculate how to fill this page. read PAGE_READ_BYTES bytes from FILE*/
-    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-    
-    /* check overlaps any existing set of mapped pages*/
-    struct page *vpage = page_lookup (t, upage);
-    if (vpage != NULL) {
-      if (vpage->frame != NULL) {
-	if (page_is_dirty(vpage)) {
-	  // write page content back to file
-	  //file_reopen (vpage->file);
-	  //file_seek (vpage->file, vpage->file_ofs);
-	  file_write_at (vpage->file, vpage->vaddr, vpage->read_bytes,
-			 vpage->file_ofs);
-	}
-      }
-      page_release(vpage);
-    }
-
-    /* Advance. */
-    read_bytes -= page_read_bytes;
-    upage += PGSIZE;
-   }
-
-  /*close file*/
-  file_close(mmap->file);
-
-  /*free thread's mmap_list*/
-  list_remove (&mmap->map_elem);
-  free (mmap);
 }
 
 static bool sys_chdir (const char *dir)
