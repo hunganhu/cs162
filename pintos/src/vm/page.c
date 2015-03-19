@@ -71,6 +71,10 @@ struct page *page_alloc (void *vaddr, bool writable)
   vpage->private = false; // page source from file
   vpage->swap_sector = (block_sector_t) -1;
   vpage->mmap_id = MAP_FAILED;
+  vpage->file = NULL;
+  vpage->file_ofs = 0;
+  vpage->read_bytes = 0;
+  vpage->zero_bytes = 0;
  
  /*insert into supplemental pages*/
   hash_insert (&cur->supplemental_pages, &vpage->hash_elem);
@@ -112,9 +116,15 @@ bool page_in (void *vaddr)
   bool success = false;
 
   vpage = page_lookup(cur, page_vaddr);
-  if (vpage == NULL && 
-      (vaddr < PHYS_BASE) && (vaddr >= PHYS_BASE - STACK_SIZE)) {
-    // for stack increament
+  /** Stack growth:
+      The 80x86 PUSH instruction checks access permissions before it adjusts
+      the stack pointer, so it may cause a page fault 4 bytes below the stack
+      pointer. (Otherwise, PUSH would not be restartable in a straightforward
+      fashion.) Similarly, the PUSHA instruction pushes 32 bytes at once, so
+      it can fault 32 bytes below the stack pointer.
+   */
+  if (vpage == NULL && (vaddr < PHYS_BASE) &&
+      (vaddr >= PHYS_BASE - STACK_SIZE) && (vaddr >= cur->stack_pointer - 32)) {
     vpage = page_alloc (vaddr, true);
   }
   

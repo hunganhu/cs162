@@ -139,8 +139,9 @@ struct thread
 					   with parent */
 #endif
 #ifdef VM
-    struct hash supplemental_pages;      /*supplemental hash pages*/
-    struct list mmap_list;               /*mmap file list*/
+    void   *stack_pointer;              /*pointer to the bottom of stack*/
+    struct hash supplemental_pages;     /*supplemental hash pages*/
+    struct list mmap_list;              /*mmap file list*/
 #endif
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

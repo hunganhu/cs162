@@ -58,9 +58,11 @@ syscall_handler (struct intr_frame *f UNUSED)
 {
   int syscall_no;
   uint32_t arg0, arg1, arg2, arg3;
+  struct thread *t = thread_current();
 
   arg0 = read_argument(f, 0);
   syscall_no = (int) arg0;
+  t->stack_pointer = f->esp;
 
   /* Synchronize syscall operation */
   //  lock_acquire (&syscall_lock);

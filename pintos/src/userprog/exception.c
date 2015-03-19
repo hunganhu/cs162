@@ -129,6 +129,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  struct thread *t = thread_current ();
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -150,6 +151,10 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+  // if page fault come from user, save its stack pointer
+  if (f->cs == SEL_UCSEG)
+    t->stack_pointer = f->esp;
 // Check if the page fault is really present or the page is in the memory
 
   /* To implement virtual memory, delete the rest of the function
@@ -160,7 +165,6 @@ page_fault (struct intr_frame *f)
       return;
     }
     //At this point - invalid virtual address or page_in failed
-    struct thread *t = thread_current ();
     t->process->exit_code = -1;
     t->process->is_exited = false;
     thread_exit ();    
@@ -168,7 +172,8 @@ page_fault (struct intr_frame *f)
   } else if (!not_present && write) { // write a r/o page
     f->eip = (void *) f->eax;
     f->eax = 0xffffffff;
-  } else {
+  } 
+  else {
     printf ("Page fault at %p: %s error %s page in %s context.\n",
 	    fault_addr,
 	    not_present ? "not present" : "rights violation",
