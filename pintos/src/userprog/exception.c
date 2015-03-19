@@ -165,6 +165,9 @@ page_fault (struct intr_frame *f)
     t->process->is_exited = false;
     thread_exit ();    
     return;
+  } else if (!not_present && write) { // write a r/o page
+    f->eip = (void *) f->eax;
+    f->eax = 0xffffffff;
   } else {
     printf ("Page fault at %p: %s error %s page in %s context.\n",
 	    fault_addr,

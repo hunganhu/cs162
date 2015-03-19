@@ -19,6 +19,7 @@
 static void syscall_handler (struct intr_frame *);
 
 static bool access_ok (const void *, unsigned);
+static bool write_ok (uint8_t *, unsigned);
 static bool valid_user_fd (int);
 static uint32_t read_argument (struct intr_frame *, int);
 
@@ -187,26 +188,38 @@ syscall_handler (struct intr_frame *f UNUSED)
 static bool
 access_ok (const void * vaddr, unsigned size)
 {
-  //  struct thread *t = thread_current();
-  //  uint32_t *pd = t->pagedir;
-
   /* If the address exceeds PHYS_BASE, or address is not mapped,  exit -1 */
-  /*
-  if (!is_user_vaddr (vaddr + size) ||
-      !is_user_vaddr (vaddr) ||
-      pagedir_get_page (pd, vaddr) == NULL || 
-      pagedir_get_page (pd, vaddr + size) == NULL)
+  if (!is_user_vaddr (vaddr + size) || !is_user_vaddr (vaddr))
     return false;
-  */
-  if (!is_user_vaddr (vaddr + size) ||
-      !is_user_vaddr (vaddr))
-    return false;
-  get_user (vaddr);
-  if (size > 0)
-    get_user (vaddr + size);
 
-  return true; 
+  int result = get_user (vaddr);
+  if (result == -1)
+    return false;
+
+  if (size > 0) {
+    result = get_user (vaddr + size);
+    if (result == -1)
+      return false;
+  }
+  return true;
 }
+
+/* Check writable for the buffer starting at vaddr, with length of size*/
+static bool
+write_ok (uint8_t *vaddr, unsigned size)
+{
+  /* If the address exceeds PHYS_BASE, or address is not mapped,  exit -1 */
+  if (!is_user_vaddr (vaddr + size) || !is_user_vaddr (vaddr))
+    return false;
+
+  if (put_user (vaddr, 'a'))
+    if (put_user (vaddr + size, 'a'))
+	return true;
+
+  return false; 
+}
+
+/* check fd is in valid range [0, 128) */
 static bool
 valid_user_fd (int fd)
 {
@@ -334,6 +347,8 @@ static int sys_read (int fd, void *buffer, unsigned size)
   /** verify parameters */
   if (!access_ok (buffer, size) || !valid_user_fd(fd) || fd == STDOUT_FILENO)
     sys_exit(-1);
+  //  if (!write_ok (buffer, size))
+  //  sys_exit(-1);
 
   struct thread *t = thread_current ();
   int byte_read = -1;
@@ -450,10 +465,14 @@ A call to mmap may fail if
  */
 static mapid_t sys_mmap (int fd, void *buffer)
 {
-  /** verify parameters */
-  if (!access_ok (buffer, 0) || !valid_user_fd(fd)
-      || fd == STDIN_FILENO || fd == STDOUT_FILENO)
-    sys_exit(-1);
+  /** verify parameters:
+      check page aligned, buffer address, file size, and stack segment
+  */
+  if (pg_ofs(buffer) != 0 || buffer == NULL || !valid_user_fd(fd) ||
+      fd == STDIN_FILENO || fd == STDOUT_FILENO || !is_user_vaddr(buffer) ||
+      (buffer >= PHYS_BASE - STACK_SIZE)) {
+    return MAP_FAILED;
+  }
 
   struct thread *t = thread_current();
   struct file *file;
@@ -469,8 +488,7 @@ static mapid_t sys_mmap (int fd, void *buffer)
   read_bytes = file_length(file);
 
   // check page aligned, buffer address, file size, and stack segment
-  if (pg_ofs(buffer) != 0 || buffer == NULL || read_bytes == 0 ||
-      (buffer >= PHYS_BASE - STACK_SIZE)) {
+  if (read_bytes == 0) {
     return MAP_FAILED;
   }
 

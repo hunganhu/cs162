@@ -178,7 +178,7 @@ bool page_out (struct page *vpage)
       file_reopen (vpage->file);
       file_seek (vpage->file, vpage->file_ofs);
       if (file_write_at (vpage->file, vpage->vaddr, vpage->read_bytes,
-			 vpage->file_ofs) != vpage->read_bytes) { 
+			 vpage->file_ofs) != (int32_t) vpage->read_bytes) { 
 	success = false; 
       } else {
 	pagedir_set_dirty (t->pagedir, vpage->vaddr, false);
