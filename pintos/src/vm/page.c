@@ -69,7 +69,7 @@ struct page *page_alloc (void *vaddr, bool writable)
   vpage->writable = writable;
   vpage->frame = NULL;
   vpage->private = false; // page source from file
-  vpage->swap_sector = (block_sector_t) -1;
+  vpage->swap_slot = (block_sector_t) -1;
   vpage->mmap_id = MAP_FAILED;
   vpage->file = NULL;
   vpage->file_ofs = 0;
@@ -89,7 +89,10 @@ void page_release (struct page *vpage)
   if (vpage->frame != NULL)
     frame_release (vpage->frame);
 
-  /** todo: free swap slots */
+  /** free swap slots */
+  swap_clear (vpage);
+
+  /**remove vpage from thread's supplemental page table */
   hash_delete (&cur->supplemental_pages, &vpage->hash_elem);
   free(vpage);
   /*delete page table entry in pagedir ?*/
@@ -138,9 +141,8 @@ bool page_in (void *vaddr)
 
   if (vpage->private) {
     // do swap in
-    if (swap_in(vpage->swap_sector)) {
-      success = true;
-    }
+    swap_in(vpage);
+    success = true;
   } else if (vpage->file == NULL) { 
     // for stack
     memset (vpage->frame->kpage, 0, PGSIZE);
@@ -205,8 +207,7 @@ bool page_out (struct page *vpage)
 bool page_is_accessed (struct page *vpage)
 {
   //check if the page frame is null
-  ASSERT (vpage->frame != NULL);
-  //ASSERT (lock_held_by_current_thread (&vpage->frame->lock));
+  // ASSERT (vpage->frame != NULL);
   //call function pagedir_is_accessed to check if it has been recently 
   //accessed
   return pagedir_is_accessed (vpage->thread->pagedir, vpage->vaddr);
@@ -220,7 +221,7 @@ void page_set_accessed (struct page *vpage, bool accessed)
 bool page_is_dirty (struct page *vpage)
 {
   //check if the page frame is null
-  ASSERT (vpage->frame != NULL);
+  // ASSERT (vpage->frame != NULL);
  
   return pagedir_is_dirty (vpage->thread->pagedir, vpage->vaddr);
 }
@@ -237,7 +238,9 @@ void page_destroy (struct hash_elem *e, void *aux UNUSED)
     frame_release (pg->frame);
   //  printf("page =0x%08"PRIx32" {vaddr=0x%08"PRIx32", frame=0x%08"PRIx32"}\n",
   //	 (unsigned)pg, (unsigned)pg->vaddr, (unsigned)pg->frame);
-  /** todo: free swap slots */
+
+  /** free swap slots */
+  swap_clear (pg);
   free (pg);
 }
 

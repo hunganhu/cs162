@@ -44,7 +44,7 @@ struct page
   bool writable;         /* page writable? */
   mapid_t mmap_id;       /* mmap file id */
   /*--attributes for page from swap-------*/
-  block_sector_t swap_sector; /* swap slot number*/
+  block_sector_t swap_slot; /* swap slot number*/
 };
 
 unsigned page_hash_value (const struct hash_elem *pe, void *aux UNUSED);

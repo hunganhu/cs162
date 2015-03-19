@@ -5,6 +5,8 @@
 #include "vm/frame.h"
 
 void swap_init(void);
-bool swap_in(block_sector_t swap_sector);
+void swap_in(struct page *vpage);
 block_sector_t swap_out(struct page *vpage);
+void swap_clear (struct page *vpage);
+
 #endif /* vm/swap.h */
