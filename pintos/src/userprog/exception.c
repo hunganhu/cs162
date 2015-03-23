@@ -160,16 +160,15 @@ page_fault (struct intr_frame *f)
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  if (not_present && is_user_vaddr(fault_addr)) {
-    if (page_in (fault_addr)) {
-      return;
-    }
-    //At this point - invalid virtual address or page_in failed
-    t->process->exit_code = -1;
-    t->process->is_exited = false;
-    thread_exit ();    
+  if (not_present) {
+    if (!page_in (fault_addr)) {
+      //At this point - invalid virtual address or page_in failed
+      t->process->exit_code = -1;
+      t->process->is_exited = false;
+      thread_exit ();
+    }    
     return;
-  } else if (!not_present && write) { // write a r/o page
+  } else if (!not_present) { // access a r/o page
     f->eip = (void *) f->eax;
     f->eax = 0xffffffff;
   } 

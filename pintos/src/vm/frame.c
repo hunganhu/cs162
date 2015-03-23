@@ -1,6 +1,7 @@
 /* frame.c
    Provide programs with free frames when needed
 */
+#include <stdio.h>
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
@@ -11,18 +12,22 @@
 
 struct list frame_table; //track system frames usage to help with eviction. 
 struct lock frame_lock;
+struct list_elem *clock_hand;
 
 /**Initializes the frame table.  */
 void frame_init (void)
 {
   void *kpage;
   struct frame *frame;
+  //  int i = 0;
 
   list_init(&frame_table);
   lock_init(&frame_lock);
+  clock_hand =  list_begin (&frame_table);
 
   /* initial frame table to allocate all available pages in the user pool */
-  //lock_acquire (&frame_lock);
+  DEBUG ("Initial frames.\n");
+  lock_acquire (&frame_lock);
   while ((kpage = palloc_get_page(PAL_USER|PAL_ZERO)) != (void *)NULL) {
     frame = malloc(sizeof(struct frame)); /*malloc a frame*/
     /*initial frame values*/
@@ -35,8 +40,9 @@ void frame_init (void)
     }
     /*append to frame table list*/
     list_push_back(&frame_table, &frame->frame_elem);
+    //DEBUG ("Frame[%03d]=0x%08"PRIx32".\n", i++, (uint32_t) frame->kpage);
   }
-  //lock_release (&frame_lock);  
+  lock_release (&frame_lock);  
 }
 
 /**Obtains and returns a free page. the frames used for user pages should 
@@ -55,13 +61,13 @@ struct frame *frame_alloc (struct page *vpage)
     frame = list_entry(e, struct frame, frame_elem);
     if (frame->vpage == NULL) {
       frame->vpage = vpage;
-      //      page_in(vpage->vaddr);
-      return frame;
+       return frame;
     }
   }
 
   /* no free frame found */
   frame = frame_victim (vpage);
+  DEBUG ("Alloc Frame=0x%08"PRIx32".\n",(uint32_t) frame->kpage);
   return frame;
 }
 
@@ -91,25 +97,40 @@ struct frame *frame_victim(struct page *vpage)
 
   lock_acquire (&frame_lock);
   while (!found) { //select a victim frame, second chance algorithm
-    for (e = list_begin (&frame_table); e != list_end (&frame_table); 
+    for (e = clock_hand; e != list_end (&frame_table); 
 	 e = list_next (e)) {
       frame = list_entry(e, struct frame, frame_elem);
-      if (page_is_accessed (vpage)) {
-	page_set_accessed (vpage, false);
-      } else {
-	found = true;
-	if (page_is_dirty (vpage)) {
-	  page_out (vpage);
+      if (!frame->pinned) {
+	if (page_is_accessed (frame->vpage)) {
+	  page_set_accessed (frame->vpage, false);
+	} else {
+	  found = true;
+	  clock_hand = e;
+	  if (page_is_dirty (frame->vpage)) {
+	    page_out (frame->vpage);
+	  }
+	  DEBUG ("Victim Frame=0x%08"PRIx32", Vpage==0x%08"PRIx32","
+		  " accessed=%s, dirty=%s.\n", 
+		  (uint32_t) frame->kpage, (uint32_t)frame->vpage->vaddr, 
+		  page_is_accessed (frame->vpage)? "T" : "F",
+		  page_is_dirty (frame->vpage)? "T" : "F");
+	  // return a clean frame
+	  frame->vpage = vpage;
+	  frame->pinned = false;
+	  //page_in(vpage->vaddr);
+	  break;
 	}
-	// return a clean frame
-	frame->vpage = vpage;
-	frame->pinned = false;
-	//page_in(vpage->vaddr);
-	break;
       }
     }
+    if (!found)
+      clock_hand = list_begin (&frame_table);
   }
   lock_release (&frame_lock);
+  DEBUG ("Return Frame=0x%08"PRIx32", Vpage==0x%08"PRIx32","
+	  " accessed=%s, dirty=%s.\n", 
+	  (uint32_t) frame->kpage, (uint32_t) frame->vpage->vaddr,
+	  page_is_accessed (vpage) ? "T" : "F",
+	  page_is_dirty (vpage) ? "T" : "F");
 
   return frame;
 }

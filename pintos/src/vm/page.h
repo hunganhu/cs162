@@ -12,6 +12,8 @@
 #define STACK_SIZE (8 * 1024 * 1024)           //8 MB stack size
 #define CODE_BASE ((void *) PINTOS_CODE_START) //virtual address should above it
 
+#define TRACE_ON false
+#define DEBUG  if (TRACE_ON) printf
 struct mmap 
 {
   mapid_t mmap_id;              /* mmap id, same as file fd */
@@ -29,6 +31,9 @@ enum page_type
     PT_ZERO    /* new page - all zeros */
   };
 
+/*
+
+*/
 struct page
 {
   void *vaddr; /* virtual address, key of hash table. */
@@ -42,7 +47,7 @@ struct page
   uint32_t read_bytes;   /* the size of the page content*/
   uint32_t zero_bytes;   /* the size of padding zeros*/
   bool writable;         /* page writable? */
-  mapid_t mmap_id;       /* mmap file id */
+  mapid_t mmap_id;       /* mmap file id, -1 for file, others for mmap file */
   /*--attributes for page from swap-------*/
   block_sector_t swap_slot; /* swap slot number*/
 };
