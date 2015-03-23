@@ -274,10 +274,11 @@ thread_create (const char *name, int priority,
 
   /* Initialize thread. */
   init_thread (t, name, priority);
+  tid = t->tid = allocate_tid ();
 #ifdef USERPROG
   init_process (t);
+  t->process->pid = tid;
 #endif
-  tid = t->tid = t->process->pid = allocate_tid ();
   //  if (t != initial_thread)
   //    t->parent_id = running_thread()->tid;
 
@@ -935,7 +936,7 @@ struct thread * get_thread (tid_t tid)
   }
   return NULL;
 }
-
+#ifdef USERPROG
 void init_process(struct thread *t)
 {
   memset (t->fd_table, 0, sizeof (t->fd_table)); 
@@ -955,7 +956,7 @@ void init_process(struct thread *t)
 
   t->parent_id = running_thread()->tid;
 }
-
+#endif
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
