@@ -19,7 +19,7 @@
 static void syscall_handler (struct intr_frame *);
 
 static bool access_ok (const void *, unsigned);
-static bool write_ok (uint8_t *, unsigned);
+//static bool write_ok (uint8_t *, unsigned);
 static bool valid_user_fd (int);
 static uint32_t read_argument (struct intr_frame *, int);
 
@@ -45,12 +45,41 @@ static bool sys_isdir (int);
 static int sys_isnumber (int);
 
 static int get_user (const uint8_t *);
-static bool put_user (uint8_t *, uint8_t);
+//static bool put_user (uint8_t *, uint8_t);
 
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
+
+/** Synchronization:
+  Here's the scenario the Pintos docs may be worried about:
+  - User program begins a file write, vectors control to your syscall handler
+  - syscall handler acquires a lock on writing to disk
+  - During the write, a page fault occurs, control is vectored to the PF handler
+  - PF handler needs to evict a page back to disk; tries to acquire a lock on
+    writing to disk. This lock has already been acquired though; deadlock.
+ */
+void 
+lock_filesys() 
+{
+  struct thread *t = thread_current();
+  if(lock_held_by_current_thread (&filesys_lock)) {
+    sema_up (&t->process->sema_disk); // raise semaphore lock has been hold 
+  } else {
+    lock_acquire (&filesys_lock);
+  }
+}
+
+void 
+unlock_filesys()
+{
+  struct thread *t = thread_current();
+  //if semaphore is up, do not release lock.
+  if (!sema_try_down(&t->process->sema_disk)) {
+    lock_release (&filesys_lock);
+  }
 }
 
 static void
@@ -86,99 +115,110 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CREATE:                 /* Create a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
        f->eax = sys_create((char *) arg1, (unsigned) arg2);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
      case SYS_REMOVE:                 /* 5 Delete a file. */
       arg1 = read_argument(f, 1);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       f->eax = sys_remove((char *) arg1);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
     case SYS_OPEN:                   /* Open a file. */
       arg1 = read_argument(f, 1);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       f->eax = sys_open((char *) arg1);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
     case SYS_FILESIZE:               /* Obtain a file's size. */
       arg1 = read_argument(f, 1);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       f->eax = sys_filesize((int) arg1);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
     case SYS_READ:                   /* Read from a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
       arg3 = read_argument(f, 3);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       f->eax = sys_read((int) arg1, (void *) arg2, (unsigned) arg3);
-      lock_release (&filesys_lock);
+      unlock_filesys();
      break;
     case SYS_WRITE:                  /* Write to a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
       arg3 = read_argument(f, 3);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       f->eax = sys_write((int) arg1, (void *) arg2, (unsigned) arg3);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
     case SYS_SEEK:                   /* 10 Change position in a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       sys_seek((int) arg1, (unsigned) arg2);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
     case SYS_TELL:                   /* Report current position in a file. */
       arg1 = read_argument(f, 1);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       f->eax = sys_tell((int) arg1);
+      unlock_filesys();
       break;
     case SYS_CLOSE:                  /* Close a file. */
       arg1 = read_argument(f, 1);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       sys_close((int) arg1);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
 
     /* Project 3 and optionally project 4. */
     case SYS_MMAP:                   /* Map a file into memory. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       f->eax = sys_mmap((int) arg1, (void *) arg2);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
     case SYS_MUNMAP:                 /* Remove a memory mapping. */
       arg1 = read_argument(f, 1);
-      lock_acquire (&filesys_lock);
+      lock_filesys();
       sys_munmap((mapid_t) arg1);
-      lock_release (&filesys_lock);
+      unlock_filesys();
       break;
 
     /* Project 4 only. */
     case SYS_CHDIR:                  /* 15 Change the current directory. */
       arg1 = read_argument(f, 1);
+      lock_filesys();
       f->eax = sys_chdir((char *) arg1);
+      unlock_filesys();
       break;
     case SYS_MKDIR:                  /* Create a directory. */
       arg1 = read_argument(f, 1);
+      lock_filesys();
       f->eax = sys_mkdir((char *) arg1);
+      unlock_filesys();
       break;
     case SYS_READDIR:                /* Reads a directory entry. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
+      lock_filesys();
       f->eax = sys_readdir((int) arg1, (char *) arg2);
+      unlock_filesys();
       break;
     case SYS_ISDIR:                  /* Tests if a fd represents a directory. */
       arg1 = read_argument(f, 1);
+      lock_filesys();
       f->eax = sys_isdir((int) arg1);
+      unlock_filesys();
       break;
     case SYS_INUMBER:                /* 19 Returns the inode number for a fd. */
       arg1 = read_argument(f, 1);
+      lock_filesys();
       f->eax = sys_isnumber((int) arg1);
+      unlock_filesys();
       break;
     default:
       break;
@@ -207,10 +247,11 @@ access_ok (const void * vaddr, unsigned size)
 }
 
 /* Check writable for the buffer starting at vaddr, with length of size*/
+/*
 static bool
 write_ok (uint8_t *vaddr, unsigned size)
 {
-  /* If the address exceeds PHYS_BASE, or address is not mapped,  exit -1 */
+// If the address exceeds PHYS_BASE, or address is not mapped,  exit -1.
   if (!is_user_vaddr (vaddr + size) || !is_user_vaddr (vaddr))
     return false;
 
@@ -220,7 +261,7 @@ write_ok (uint8_t *vaddr, unsigned size)
 
   return false; 
 }
-
+*/
 /* check fd is in valid range [0, 128) */
 static bool
 valid_user_fd (int fd)
@@ -623,6 +664,7 @@ get_user (const uint8_t *uaddr)
 /* Writes BYTE to user address UDST.
    UDST must be below PHYS_BASE.
    Returns true if successful, false if a segfault occurred. */
+/*
 static bool
 put_user (uint8_t *udst, uint8_t byte)
 {
@@ -631,3 +673,4 @@ put_user (uint8_t *udst, uint8_t byte)
        : "=&a" (error_code), "=m" (*udst) : "q" (byte));
   return error_code != -1;
 }
+*/

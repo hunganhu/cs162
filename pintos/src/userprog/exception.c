@@ -13,6 +13,7 @@ static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+bool is_stack (void* fault_addr, void *esp);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -155,30 +156,77 @@ page_fault (struct intr_frame *f)
   // if page fault come from user, save its stack pointer
   if (f->cs == SEL_UCSEG)
     t->stack_pointer = f->esp;
-// Check if the page fault is really present or the page is in the memory
+  /*
+  DEBUG ("Page fault at %p: %s error %s page in %s context, thread(%p), esp(%p).\n",
+	  fault_addr,
+	  not_present ? "not present" : "rights violation",
+	  write ? "writing" : "reading",
+	  user ? "user" : "kernel",
+	  t, t->stack_pointer);
+  */
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  if (not_present) {
-    if (!page_in (fault_addr)) {
-      //At this point - invalid virtual address or page_in failed
+  void *fault_page = pg_round_down (fault_addr);
+  struct page *page_found;
+
+  if (not_present && is_user_vaddr(fault_addr)) {
+    if (is_stack (fault_addr, t->stack_pointer)) { // check stack growth
+      page_alloc(fault_page, true);
+    }
+    page_found = page_lookup (t, fault_page);
+
+    if (page_found != NULL) {
+      if (!page_in (fault_page)) {
+	//At this point - invalid virtual address or page_in failed
+	t->process->exit_code = -1;
+	t->process->is_exited = false;
+	thread_exit ();
+      }    
+      return;
+    } else { // invalid virtual address, terminate.
       t->process->exit_code = -1;
       t->process->is_exited = false;
       thread_exit ();
-    }    
-    return;
-  } else if (!not_present) { // access a r/o page
+    }
+  }
+
+  if (!not_present) { // access a restricted page, kill process
     f->eip = (void *) f->eax;
     f->eax = 0xffffffff;
+    t->process->exit_code = -1;
+    t->process->is_exited = false;
+    thread_exit ();
+    return;
   } 
-  else {
-    printf ("Page fault at %p: %s error %s page in %s context.\n",
-	    fault_addr,
-	    not_present ? "not present" : "rights violation",
-	    write ? "writing" : "reading",
-	    user ? "user" : "kernel");
-    kill (f);
-  } 
+
+  printf ("Page fault at %p: %s error %s page in %s context,"
+	  " thread(%p), esp(%p).\n",
+	  fault_addr,
+	  not_present ? "not present" : "rights violation",
+	  write ? "writing" : "reading",
+	  user ? "user" : "kernel",
+	  t, t->stack_pointer);
+  kill (f);
 }
 
+bool is_stack (void* fault_addr, void *esp)
+{
+  /** Stack growth:
+      The 80x86 PUSH instruction checks access permissions before it adjusts
+      the stack pointer, so it may cause a page fault 4 bytes below the stack
+      pointer. (Otherwise, PUSH would not be restartable in a straightforward
+      fashion.) Similarly, the PUSHA instruction pushes 32 bytes at once, so
+      it can fault 32 bytes below the stack pointer.
+  */
+  if (fault_addr > PHYS_BASE)
+    return false;
+
+  if (fault_addr > (PHYS_BASE - STACK_SIZE) &&
+      (fault_addr >= esp || fault_addr == (esp - 32) ||
+       fault_addr == (esp - 4))) {
+    return true;
+  } else
+    return false;
+}

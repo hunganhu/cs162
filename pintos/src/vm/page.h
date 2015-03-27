@@ -32,7 +32,12 @@ enum page_type
   };
 
 /*
-
+Fields for various page sources:
+source private mmap_id swap_slot file file_ofs read_bytes zero_bytes  
+FILE   false   N       N         Y    Y        Y          Y
+MMAP   false   Y       N         Y    Y        Y          Y
+STACK  false   N       N         N    N        N          N
+SWAP   true    N       Y         Y/N  Y/N      Y/N        Y/N
 */
 struct page
 {
@@ -40,7 +45,7 @@ struct page
   struct frame *frame;        /* physical frame assigned*/
   struct thread *thread;      /* page owner */
   struct hash_elem hash_elem; /* Hash table element. */
-  bool private;       /*flag for page source, True for swap and false for file*/
+  bool private;       /*flag for swap, true for swap_out and false for no swap*/
   /*--attributes for page from file-------*/
   struct file *file;     /* the file that the page sources */
   off_t file_ofs;        /* starting position of the file */

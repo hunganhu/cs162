@@ -10,6 +10,7 @@
 #include "threads/vaddr.h"
 #include "filesys/file.h"
 #include "userprog/pagedir.h"
+#include "userprog/syscall.h"
 #include "vm/page.h"
 #include "vm/frame.h"
 #include "vm/swap.h"
@@ -35,13 +36,13 @@ page_hash_less (const struct hash_elem *a, const struct hash_elem *b,
 /**
  */
 struct page *
-page_lookup (struct thread *cur, void *vaddr)
+page_lookup (struct thread *t, void *vaddr)
 {
   struct page p;
   struct hash_elem *e;
 
   p.vaddr = vaddr;
-  e = hash_find (&cur->supplemental_pages, &p.hash_elem);
+  e = hash_find (&t->supplemental_pages, &p.hash_elem);
 
   return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
@@ -51,10 +52,10 @@ page_lookup (struct thread *cur, void *vaddr)
 struct page *page_alloc (void *vaddr, bool writable)
 {
   struct page *vpage;
-  struct thread *cur = thread_current();
+  struct thread *t = thread_current();
   void *page_vaddr = pg_round_down(vaddr); /*the page vaddr is in*/
 
-  vpage = page_lookup(cur, page_vaddr);
+  vpage = page_lookup(t, page_vaddr);
   if (vpage != NULL)    /* vaddr is already in thread's supplemental pages */
     return vpage;
   /* vaddr not in current supplemental pages */
@@ -65,7 +66,7 @@ struct page *page_alloc (void *vaddr, bool writable)
 
   /*initial a new page entry */
   vpage->vaddr = page_vaddr;
-  vpage->thread = cur;
+  vpage->thread = t;
   vpage->writable = writable;
   vpage->frame = NULL;
   vpage->private = false; // page source from file
@@ -77,14 +78,14 @@ struct page *page_alloc (void *vaddr, bool writable)
   vpage->zero_bytes = 0;
  
  /*insert into supplemental pages*/
-  hash_insert (&cur->supplemental_pages, &vpage->hash_elem);
+  hash_insert (&t->supplemental_pages, &vpage->hash_elem);
 
   return vpage;
 }
 
 void page_release (struct page *vpage)
 {
-  struct thread *cur = thread_current();
+  struct thread *t = thread_current();
   /** free frame table */
   if (vpage->frame != NULL)
     frame_release (vpage->frame);
@@ -94,7 +95,7 @@ void page_release (struct page *vpage)
     swap_clear (vpage);
 
   /**remove vpage from thread's supplemental page table */
-  hash_delete (&cur->supplemental_pages, &vpage->hash_elem);
+  hash_delete (&t->supplemental_pages, &vpage->hash_elem);
   free(vpage);
   /*delete page table entry in pagedir ?*/
 }
@@ -112,14 +113,15 @@ void page_release (struct page *vpage)
        (file_id, offset, length).
     8. for swap (private=T), read the content from swap device(block_sector).
  */
+
 bool page_in (void *vaddr)
 {
   struct page *vpage;
-  struct thread *cur = thread_current();
+  struct thread *t = thread_current();
   void *page_vaddr = pg_round_down(vaddr); /*the page that vaddr is in*/
   bool success = false;
 
-  vpage = page_lookup(cur, page_vaddr);
+  vpage = page_lookup(t, page_vaddr);
   /** Stack growth:
       The 80x86 PUSH instruction checks access permissions before it adjusts
       the stack pointer, so it may cause a page fault 4 bytes below the stack
@@ -127,15 +129,16 @@ bool page_in (void *vaddr)
       fashion.) Similarly, the PUSHA instruction pushes 32 bytes at once, so
       it can fault 32 bytes below the stack pointer.
    */
-  if (vpage == NULL && is_user_vaddr(vaddr) &&
-      (vaddr >= PHYS_BASE - STACK_SIZE) && (vaddr >= cur->stack_pointer - 32)) {
+  /*
+  if (vpage == NULL && vaddr < PHYS_BASE && vaddr > CODE_BASE &&
+      (vaddr >= PHYS_BASE - STACK_SIZE) && (vaddr >= t->stack_pointer - 32)) {
     vpage = page_alloc (vaddr, true);
   }
-  
+  */
   if (vpage == NULL)
     return false;
 
-  ASSERT (vpage->thread == cur);
+  ASSERT (vpage->thread == t);
 
   if (vpage->frame == NULL)
     vpage->frame = frame_alloc(vpage);
@@ -152,6 +155,8 @@ bool page_in (void *vaddr)
     success = true;
   } else {
     vpage->frame->pinned = true;   //set frame pinned
+
+    lock_filesys();
     file_seek (vpage->file, vpage->file_ofs);
     if (file_read (vpage->file, vpage->frame->kpage, vpage->read_bytes) 
 	!= (int) vpage->read_bytes) {
@@ -160,19 +165,23 @@ bool page_in (void *vaddr)
       memset (vpage->frame->kpage + vpage->read_bytes, 0, vpage->zero_bytes);
       success = true;
     }
+    unlock_filesys();
     vpage->frame->pinned = false;   //set frame unpinned
   }
   if (success) {
     /* Add the page to the process's address space. */
-    if (!pagedir_set_page (cur->pagedir, vpage->vaddr, 
-			   vpage->frame->kpage, vpage->writable))  {
-      success = false; 
+    if (pagedir_get_page (t->pagedir, vpage->vaddr) == NULL)
+      if (!pagedir_set_page (t->pagedir, vpage->vaddr, 
+			     vpage->frame->kpage, vpage->writable))  {
+	success = false; 
     }
-    DEBUG ("PageIn=0x%08"PRIx32", frame=0x%08"PRIx32", "
-	    "accessed=%s, dirty=%s.\n", 
-	    (uint32_t) vpage->vaddr, (uint32_t) vpage->frame->kpage,
-	    page_is_accessed (vpage)? "T" : "F",
-	    page_is_dirty (vpage)? "T" : "F");
+    DEBUG ("PageIn=%p, frame=%p, accessed=%s, dirty=%s, "
+	   "private=%s, file=%p, ofs=%d, read=%d,zero=%d.\n", 
+	   vpage->vaddr, vpage->frame->kpage,
+	   page_is_accessed (vpage)? "T" : "F",
+	   page_is_dirty (vpage)? "T" : "F",
+	   vpage->private? "T" : "F",
+	   vpage->file, vpage->file_ofs, vpage->read_bytes, vpage->zero_bytes);
   }
   return success;
 }
@@ -186,11 +195,14 @@ bool page_out (struct page *vpage)
   bool success = false;
   struct thread *t = thread_current();
 
-  DEBUG ("PageOut=0x%08"PRIx32", frame==0x%08"PRIx32","
-	  " accessed=%s, dirty=%s.\n", 
-	  (uint32_t) vpage->vaddr, (uint32_t) vpage->frame->kpage,
-	  page_is_accessed (vpage)? "T" : "F",
-	  page_is_dirty (vpage)? "T" : "F");
+  DEBUG ("PageOut=%p, frame=%p, accessed=%s, dirty=%s, "
+	 "private=%s, file=%p, ofs=%d, read=%d,zero=%d.\n", 
+	 vpage->vaddr, vpage->frame->kpage,
+	 page_is_accessed (vpage)? "T" : "F",
+	 page_is_dirty (vpage)? "T" : "F",
+	 vpage->private? "T" : "F",
+	 vpage->file, vpage->file_ofs, vpage->read_bytes, vpage->zero_bytes);
+
   if (page_is_dirty(vpage)) {
     if (vpage->file == NULL) { 
       // page source is stack
@@ -202,6 +214,8 @@ bool page_out (struct page *vpage)
       success = true;
     } else if (vpage->file != NULL && vpage->mmap_id != MAP_FAILED) {
       //page source is mmap, write the dirty page to mmap file
+
+      lock_filesys();
       file_reopen (vpage->file);
       file_seek (vpage->file, vpage->file_ofs);
       if (file_write_at (vpage->file, vpage->vaddr, vpage->read_bytes,
@@ -213,6 +227,8 @@ bool page_out (struct page *vpage)
 	success = true;
       }
     }
+    unlock_filesys();
+      
     if (success) {
       pagedir_clear_page (t->pagedir, vpage->vaddr);
     }

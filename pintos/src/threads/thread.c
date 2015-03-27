@@ -952,7 +952,8 @@ void init_process(struct thread *t)
   t->process->is_waited = false;
   t->process->is_loaded = false;
   t->process->exit_code = -1;  
-  sema_init (&t->process->sema_wait, 0);
+  sema_init (&t->process->sema_wait, 0);  //wait for an event to be happened
+  sema_init (&t->process->sema_disk, 0);  //wait for an event to be happened
 
   t->parent_id = running_thread()->tid;
 }

@@ -24,7 +24,7 @@ void swap_init(void)
     return;
   }
   /* Create bitmap table based on page number */
-  swap_bitmap = bitmap_create( block_size(swap_device)/ PAGE_BLOCKS);
+  swap_bitmap = bitmap_create( block_size(swap_device));
 
   if (swap_bitmap == NULL) {
     PANIC("Swap device initial fails.\n");
@@ -45,19 +45,25 @@ void swap_in(struct page *vpage)
   ASSERT (vpage->private == true);
   ASSERT (vpage->swap_slot != BITMAP_ERROR);
   ASSERT (bitmap_all (swap_bitmap, vpage->swap_slot, 1));
+  ASSERT (vpage->frame != NULL);
 
-  DEBUG ("SwapIn=0x%08"PRIx32", slot=%d.\n",
-	  (uint32_t) vpage->vaddr, vpage->swap_slot);
+  DEBUG ("SwapIn=%p, frame=%p, slot=%d.\n", vpage->vaddr,
+	 vpage->frame->kpage, vpage->swap_slot);
   lock_acquire (&swap_lock);
   vpage->frame->pinned = true;   //set frame pinned
-  // restore content of vpage from swap disk
-  for (i = vpage->swap_slot * PAGE_BLOCKS, buffer = vpage->frame->kpage;
+  // load content of vpage from swap disk
+  for (i = 0, buffer = vpage->frame->kpage;
        i < PAGE_BLOCKS;
        i++, buffer += BLOCK_SECTOR_SIZE) {
-    block_read (swap_device, i, buffer);
+    block_read (swap_device, vpage->swap_slot + i, buffer);
+  
+    printf ("SwapIn=%p, frame=%p slot=%d.\n", vpage->vaddr, 
+	    buffer, vpage->swap_slot + i);
+    hex_dump(0, buffer, BLOCK_SECTOR_SIZE, true);
+   
   }
   vpage->frame->pinned = false;   //set frame unpinned
-  bitmap_set (swap_bitmap, vpage->swap_slot, false);
+  bitmap_set_multiple (swap_bitmap, vpage->swap_slot, PAGE_BLOCKS, false);
   lock_release (&swap_lock);
 
   //update vpage meta data
@@ -74,7 +80,7 @@ block_sector_t swap_out(struct page *vpage)
   void *buffer;
 
   lock_acquire (&swap_lock);
-  swap_idx = bitmap_scan_and_flip (swap_bitmap, 0, 1, false);
+  swap_idx = bitmap_scan_and_flip (swap_bitmap, 0, PAGE_BLOCKS, false);
   //bitmap_dump(swap_bitmap);
 
   if (swap_idx != BITMAP_ERROR) {
@@ -83,10 +89,17 @@ block_sector_t swap_out(struct page *vpage)
 	   swap_idx);
     //write content of vpage to swap disk
     vpage->frame->pinned = true;   //set frame pinned
-    for (i = swap_idx * PAGE_BLOCKS, buffer = vpage->frame->kpage;
+    for (i = 0, buffer = vpage->frame->kpage;
 	 i < PAGE_BLOCKS;
 	 i++, buffer += BLOCK_SECTOR_SIZE) {
-      block_write (swap_device, i, buffer);
+      block_write (swap_device, swap_idx + i, buffer);
+      
+      if (vpage->private==false && vpage->read_bytes>0) {
+	printf ("SwapOut=%p, frame=%p, slot=%d.\n", 
+	       vpage->vaddr, buffer, swap_idx + i);
+	hex_dump(0, buffer, BLOCK_SECTOR_SIZE, true);
+      }
+      
     }
     vpage->frame->pinned = false;   //set frame unpinned
     //update vpage meta data

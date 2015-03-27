@@ -67,7 +67,7 @@ struct frame *frame_alloc (struct page *vpage)
 
   /* no free frame found */
   frame = frame_victim (vpage);
-  DEBUG ("Alloc Frame=0x%08"PRIx32".\n",(uint32_t) frame->kpage);
+  //  DEBUG ("Alloc Frame=0x%08"PRIx32".\n",(uint32_t) frame->kpage);
   return frame;
 }
 
@@ -94,12 +94,15 @@ struct frame *frame_victim(struct page *vpage)
   struct list_elem *e;
   struct frame *frame = NULL;
   bool found = false;
+  //  struct thread *cur = thread_current();
 
   lock_acquire (&frame_lock);
   while (!found) { //select a victim frame, second chance algorithm
     for (e = clock_hand; e != list_end (&frame_table); 
 	 e = list_next (e)) {
       frame = list_entry(e, struct frame, frame_elem);
+      //ignore pinned frames and frame owner is not me
+      //if (!frame->pinned && (frame->vpage->thread != cur)) {
       if (!frame->pinned) {
 	if (page_is_accessed (frame->vpage)) {
 	  page_set_accessed (frame->vpage, false);
@@ -109,15 +112,16 @@ struct frame *frame_victim(struct page *vpage)
 	  if (page_is_dirty (frame->vpage)) {
 	    page_out (frame->vpage);
 	  }
+	  /*
 	  DEBUG ("Victim Frame=0x%08"PRIx32", Vpage==0x%08"PRIx32","
 		  " accessed=%s, dirty=%s.\n", 
 		  (uint32_t) frame->kpage, (uint32_t)frame->vpage->vaddr, 
 		  page_is_accessed (frame->vpage)? "T" : "F",
 		  page_is_dirty (frame->vpage)? "T" : "F");
+	  */
 	  // return a clean frame
 	  frame->vpage = vpage;
 	  frame->pinned = false;
-	  //page_in(vpage->vaddr);
 	  break;
 	}
       }
@@ -126,12 +130,13 @@ struct frame *frame_victim(struct page *vpage)
       clock_hand = list_begin (&frame_table);
   }
   lock_release (&frame_lock);
+  /*
   DEBUG ("Return Frame=0x%08"PRIx32", Vpage==0x%08"PRIx32","
 	  " accessed=%s, dirty=%s.\n", 
 	  (uint32_t) frame->kpage, (uint32_t) frame->vpage->vaddr,
 	  page_is_accessed (vpage) ? "T" : "F",
 	  page_is_dirty (vpage) ? "T" : "F");
-
+  */
   return frame;
 }
 

@@ -43,6 +43,7 @@ struct process
   bool    is_loaded;                  /**Program loaded */
   tid_t   pid;                        /**Process ID */
   struct list_elem child_elem;
+  struct semaphore sema_disk;         /**indicator of access filesys */
 };
 
 /* A kernel thread or user process.

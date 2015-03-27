@@ -756,7 +756,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           return false; 
         }
 #endif
-
+      /*
+	DEBUG ("VPage: vaddr=%p, "
+	     "private=%s, file=%p, ofs=%d, read=%d, zero=%d.\n", 
+	     page_entry->vaddr,
+	     page_entry->private? "T" : "F",
+	     page_entry->file, page_entry->file_ofs, 
+	     page_entry->read_bytes, page_entry->zero_bytes);
+      */
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -776,12 +783,14 @@ setup_stack (void **esp)
 #ifdef VM
   struct page *page_entry = page_alloc(((uint8_t *) PHYS_BASE) - PGSIZE, true);
   if (page_entry != NULL) {
-    page_entry->file = NULL;
-    page_entry->file_ofs = 0;
-    page_entry->read_bytes = 0;
-    page_entry->zero_bytes = 0;
-    success = true;
-    *esp = PHYS_BASE;
+    page_entry->frame = frame_alloc (page_entry);
+    page_entry->frame->pinned = true;
+    if (page_entry->frame != NULL) {
+      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE,
+			      page_entry->frame->kpage, true);
+      if (success)
+	*esp = PHYS_BASE;
+    }
   } // else success = false as default
 #else
   uint8_t *kpage;
