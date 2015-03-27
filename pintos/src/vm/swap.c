@@ -4,10 +4,14 @@
 #include <bitmap.h>
 #include <debug.h>
 #include <stdio.h>
+#include <string.h>
+#include "threads/malloc.h"
+#include "threads/thread.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "devices/block.h"
 
+#include "vm/frame.h"
 #include "vm/page.h"
 #include "vm/swap.h"
 
@@ -24,13 +28,13 @@ void swap_init(void)
     return;
   }
   /* Create bitmap table based on page number */
-  swap_bitmap = bitmap_create( block_size(swap_device));
+  swap_bitmap = bitmap_create (block_size(swap_device));
 
   if (swap_bitmap == NULL) {
     PANIC("Swap device initial fails.\n");
     return;
   }
-  lock_init(&swap_lock);
+  lock_init (&swap_lock);
   DEBUG ("Swap Init, Disk size=%d sector, Bitmap size=%d, Page blocks=%d.\n",
 	  block_size(swap_device), bitmap_size(swap_bitmap), PAGE_BLOCKS);
   //bitmap_dump(swap_bitmap);
@@ -40,6 +44,7 @@ void swap_in(struct page *vpage)
 {
   int i = 0;
   void *buffer;
+  //struct thread *t = thread_current();
 
   ASSERT (vpage != NULL);
   ASSERT (vpage->private == true);
@@ -56,11 +61,11 @@ void swap_in(struct page *vpage)
        i < PAGE_BLOCKS;
        i++, buffer += BLOCK_SECTOR_SIZE) {
     block_read (swap_device, vpage->swap_slot + i, buffer);
-  
+    /*  
     printf ("SwapIn=%p, frame=%p slot=%d.\n", vpage->vaddr, 
 	    buffer, vpage->swap_slot + i);
     hex_dump(0, buffer, BLOCK_SECTOR_SIZE, true);
-   
+    */
   }
   vpage->frame->pinned = false;   //set frame unpinned
   bitmap_set_multiple (swap_bitmap, vpage->swap_slot, PAGE_BLOCKS, false);
@@ -78,6 +83,7 @@ block_sector_t swap_out(struct page *vpage)
   size_t swap_idx;
   int i;
   void *buffer;
+  //struct thread *t = thread_current();
 
   lock_acquire (&swap_lock);
   swap_idx = bitmap_scan_and_flip (swap_bitmap, 0, PAGE_BLOCKS, false);
@@ -93,19 +99,31 @@ block_sector_t swap_out(struct page *vpage)
 	 i < PAGE_BLOCKS;
 	 i++, buffer += BLOCK_SECTOR_SIZE) {
       block_write (swap_device, swap_idx + i, buffer);
-      
+      /*  
       if (vpage->private==false && vpage->read_bytes>0) {
 	printf ("SwapOut=%p, frame=%p, slot=%d.\n", 
 	       vpage->vaddr, buffer, swap_idx + i);
 	hex_dump(0, buffer, BLOCK_SECTOR_SIZE, true);
       }
-      
+      */
     }
     vpage->frame->pinned = false;   //set frame unpinned
     //update vpage meta data
     vpage->private = true;
     vpage->swap_slot = swap_idx;
     vpage->frame = NULL;
+  }
+  if (TRACE_ON) {
+    char buf2[PGSIZE];
+
+    // load content of vpage from swap disk
+    for (i = 0; i < PAGE_BLOCKS; i++) {
+      block_read (swap_device, vpage->swap_slot+i, buf2+i*BLOCK_SECTOR_SIZE);
+    }
+    if (memcmp(buf2, vpage->frame->kpage, PGSIZE) ==0)
+      printf ("swap in and out are the same.\n");
+    else
+      printf ("swap in and out are different.\n");
   }
   lock_release (&swap_lock);
 

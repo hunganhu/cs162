@@ -166,8 +166,10 @@ bool page_in (void *vaddr)
       success = true;
     }
     unlock_filesys();
-    vpage->frame->pinned = false;   //set frame unpinned
+    if (vpage->writable) // for text(writable=false), remain pinned
+      vpage->frame->pinned = false;   //set frame unpinned
   }
+
   if (success) {
     /* Add the page to the process's address space. */
     if (pagedir_get_page (t->pagedir, vpage->vaddr) == NULL)
@@ -192,7 +194,7 @@ bool page_out (struct page *vpage)
   ASSERT (vpage->frame != NULL);
   ASSERT (vpage->private == false);
 
-  bool success = false;
+  bool success = true;
   struct thread *t = thread_current();
 
   DEBUG ("PageOut=%p, frame=%p, accessed=%s, dirty=%s, "
@@ -207,14 +209,11 @@ bool page_out (struct page *vpage)
     if (vpage->file == NULL) { 
       // page source is stack
       swap_out(vpage);
-      success = true;
     } else if (vpage->file != NULL && vpage->mmap_id == MAP_FAILED){
       // page source is file
       swap_out(vpage);
-      success = true;
     } else if (vpage->file != NULL && vpage->mmap_id != MAP_FAILED) {
       //page source is mmap, write the dirty page to mmap file
-
       lock_filesys();
       file_reopen (vpage->file);
       file_seek (vpage->file, vpage->file_ofs);
@@ -223,16 +222,13 @@ bool page_out (struct page *vpage)
 	success = false; 
       } else {
 	pagedir_set_dirty (t->pagedir, vpage->vaddr, false);
-	vpage->frame = NULL;
-	success = true;
       }
+      unlock_filesys();
     }
-    unlock_filesys();
-      
-    if (success) {
-      pagedir_clear_page (t->pagedir, vpage->vaddr);
-    }
-  } else {
+  }
+
+  if (success) {
+    pagedir_clear_page (t->pagedir, vpage->vaddr);
     vpage->frame = NULL;
   }
   return success;

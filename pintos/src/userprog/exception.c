@@ -188,6 +188,16 @@ page_fault (struct intr_frame *f)
     } else { // invalid virtual address, terminate.
       t->process->exit_code = -1;
       t->process->is_exited = false;
+      if (TRACE_ON) {
+	DEBUG ("Page fault at %p: %s error %s page in %s context,"
+	       " thread(%p), esp(%p).\n",
+	       fault_addr,
+	       not_present ? "not present" : "rights violation",
+	       write ? "writing" : "reading",
+	       user ? "user" : "kernel",
+	       t, t->stack_pointer);
+	kill (f);
+      }
       thread_exit ();
     }
   }
@@ -197,6 +207,16 @@ page_fault (struct intr_frame *f)
     f->eax = 0xffffffff;
     t->process->exit_code = -1;
     t->process->is_exited = false;
+    if (TRACE_ON) {
+      DEBUG ("Page fault at %p: %s error %s page in %s context,"
+	     " thread(%p), esp(%p).\n",
+	     fault_addr,
+	     not_present ? "not present" : "rights violation",
+	     write ? "writing" : "reading",
+	     user ? "user" : "kernel",
+	     t, t->stack_pointer);
+      kill (f);
+    }
     thread_exit ();
     return;
   } 
