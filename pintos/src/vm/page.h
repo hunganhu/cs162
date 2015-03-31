@@ -71,5 +71,7 @@ bool page_is_dirty (struct page *vpage);
 void page_destroy (struct hash_elem *e, void *aux UNUSED);
 struct mmap *mmap_get_id(mapid_t mapid);
 void page_munmap (struct mmap *mmap);
+void page_pin (void *page_vaddr);
+void page_unpin (void *page_vaddr);
 
 #endif /* vm/page.h */

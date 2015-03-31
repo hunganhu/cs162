@@ -9,6 +9,7 @@
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
 #include "filesys/file.h"
+#include "userprog/exception.h"
 #include "userprog/pagedir.h"
 #include "userprog/syscall.h"
 #include "vm/page.h"
@@ -97,7 +98,44 @@ void page_release (struct page *vpage)
   /**remove vpage from thread's supplemental page table */
   hash_delete (&t->supplemental_pages, &vpage->hash_elem);
   free(vpage);
-  /*delete page table entry in pagedir ?*/
+}
+
+void page_pin (void *page_vaddr)
+{
+  struct page *vpage;
+  struct thread *t = thread_current();
+
+  vpage = page_lookup(t, page_vaddr);
+
+  DEBUG ("PagePin=%p, frame=%p, accessed=%s, dirty=%s, "
+	 "private=%s, pinned=%s, file=%p, ofs=%d, read=%d,zero=%d.\n", 
+	 vpage->vaddr, vpage->frame->kpage,
+	 page_is_accessed (vpage)? "T" : "F",
+	 page_is_dirty (vpage)? "T" : "F",
+	 vpage->private? "T" : "F",
+	 vpage->frame->pinned? "T" : "F",
+	 vpage->file, vpage->file_ofs, vpage->read_bytes, vpage->zero_bytes);
+ 
+ if (vpage == NULL) {
+   if (page_in (vpage))
+     vpage->frame->pinned = true;
+ } else if (vpage->frame == NULL) {
+   if (page_in (vpage))
+     vpage->frame->pinned = true;
+ } else {
+    vpage->frame->pinned = true;
+  }
+}
+
+void page_unpin (void *page_vaddr)
+{
+  struct page *vpage;
+  struct thread *t = thread_current();
+
+  vpage = page_lookup(t, page_vaddr);
+  ASSERT (vpage != NULL);
+  if (vpage->frame != NULL)
+    vpage->frame->pinned = false;
 }
 
 /** page_in algorithm
@@ -113,7 +151,6 @@ void page_release (struct page *vpage)
        (file_id, offset, length).
     8. for swap (private=T), read the content from swap device(block_sector).
  */
-
 bool page_in (void *vaddr)
 {
   struct page *vpage;
@@ -121,20 +158,11 @@ bool page_in (void *vaddr)
   void *page_vaddr = pg_round_down(vaddr); /*the page that vaddr is in*/
   bool success = false;
 
-  vpage = page_lookup(t, page_vaddr);
-  /** Stack growth:
-      The 80x86 PUSH instruction checks access permissions before it adjusts
-      the stack pointer, so it may cause a page fault 4 bytes below the stack
-      pointer. (Otherwise, PUSH would not be restartable in a straightforward
-      fashion.) Similarly, the PUSHA instruction pushes 32 bytes at once, so
-      it can fault 32 bytes below the stack pointer.
-   */
-  /*
-  if (vpage == NULL && vaddr < PHYS_BASE && vaddr > CODE_BASE &&
-      (vaddr >= PHYS_BASE - STACK_SIZE) && (vaddr >= t->stack_pointer - 32)) {
-    vpage = page_alloc (vaddr, true);
+  if (is_stack (vaddr, t->stack_pointer)) { // check stack growth
+    page_alloc(vaddr, true);
   }
-  */
+ 
+  vpage = page_lookup(t, page_vaddr);
   if (vpage == NULL)
     return false;
 
@@ -166,7 +194,9 @@ bool page_in (void *vaddr)
       success = true;
     }
     unlock_filesys();
-    if (vpage->writable) // for text(writable=false), remain pinned
+    // Keep text(writable=false) pinned
+    // pass page-merge-seq, page-merge-par, page-merge-stk, page-merge-mm
+    if (vpage->writable)
       vpage->frame->pinned = false;   //set frame unpinned
   }
 
@@ -258,8 +288,6 @@ bool page_is_dirty (struct page *vpage)
 void page_destroy (struct hash_elem *e, void *aux UNUSED)
 {
   struct page *pg = hash_entry (e, struct page, hash_elem);
-  //DEBUG ("page =0x%08"PRIx32" {vaddr=0x%08"PRIx32", frame=0x%08"PRIx32"}\n",
-  //	 (unsigned)pg, (unsigned)pg->vaddr, (unsigned)pg->frame);
 
   /** release frame table */
   if (pg->frame != NULL)

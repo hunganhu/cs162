@@ -1,7 +1,7 @@
 #include "userprog/exception.h"
 #include "userprog/syscall.h"
-#include <inttypes.h>
-#include <stdio.h>
+//#include <inttypes.h>
+//#include <stdio.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -13,7 +13,6 @@ static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
-bool is_stack (void* fault_addr, void *esp);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -168,24 +167,10 @@ page_fault (struct intr_frame *f)
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  void *fault_page = pg_round_down (fault_addr);
-  struct page *page_found;
 
   if (not_present && is_user_vaddr(fault_addr)) {
-    if (is_stack (fault_addr, t->stack_pointer)) { // check stack growth
-      page_alloc(fault_page, true);
-    }
-    page_found = page_lookup (t, fault_page);
-
-    if (page_found != NULL) {
-      if (!page_in (fault_page)) {
-	//At this point - invalid virtual address or page_in failed
-	t->process->exit_code = -1;
-	t->process->is_exited = false;
-	thread_exit ();
-      }    
-      return;
-    } else { // invalid virtual address, terminate.
+    if (!page_in (fault_addr)) {
+      //At this point - invalid virtual address or page_in failed
       t->process->exit_code = -1;
       t->process->is_exited = false;
       if (TRACE_ON) {
@@ -199,7 +184,9 @@ page_fault (struct intr_frame *f)
 	kill (f);
       }
       thread_exit ();
+      return;
     }
+    return;
   }
 
   if (!not_present) { // access a restricted page, kill process
@@ -231,7 +218,7 @@ page_fault (struct intr_frame *f)
   kill (f);
 }
 
-bool is_stack (void* fault_addr, void *esp)
+bool is_stack (void *fault_addr, void *esp)
 {
   /** Stack growth:
       The 80x86 PUSH instruction checks access permissions before it adjusts

@@ -141,17 +141,13 @@ syscall_handler (struct intr_frame *f UNUSED)
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
       arg3 = read_argument(f, 3);
-      lock_filesys();
       f->eax = sys_read((int) arg1, (void *) arg2, (unsigned) arg3);
-      unlock_filesys();
      break;
     case SYS_WRITE:                  /* Write to a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
       arg3 = read_argument(f, 3);
-      lock_filesys();
       f->eax = sys_write((int) arg1, (void *) arg2, (unsigned) arg3);
-      unlock_filesys();
       break;
     case SYS_SEEK:                   /* 10 Change position in a file. */
       arg1 = read_argument(f, 1);
@@ -385,13 +381,18 @@ static int sys_filesize (int fd)
   return size;
 }
 
+/** Refer to Pintos reference 4.3.5 accessing user memory
+   you must not allow page faults to occur while a device driver accesses
+   a user buffer passed to file_read, because you would not be able to
+   invoke the driver while handling such faults.
+
+   This modification is for sys_read and sys_write calls.
+ */
 static int sys_read (int fd, void *buffer, unsigned size)
 {
   /** verify parameters */
   if (!access_ok (buffer, size) || !valid_user_fd(fd) || fd == STDOUT_FILENO)
     sys_exit(-1);
-  //  if (!write_ok (buffer, size))
-  //  sys_exit(-1);
 
   struct thread *t = thread_current ();
   int byte_read = -1;
@@ -409,9 +410,32 @@ static int sys_read (int fd, void *buffer, unsigned size)
   else {
     /* Get file info*/
     struct file *file_ = t->fd_table[fd];
+    int num_read = 0;
+    int page_read_bytes;
+    uint32_t bytes_to_read;
+    void *upage;
 
-    if (file_ != NULL)
-      byte_read = file_read (file_, buffer, size);
+    //    if (file_ != NULL)
+    //      byte_read = file_read (file_, buffer, size);
+    if (file_ != NULL) {
+      upage = pg_round_down(buffer);
+      byte_read = 0;
+      while (size > 0) {
+	bytes_to_read = PGSIZE - pg_ofs (buffer);
+	page_read_bytes = size < bytes_to_read ? size : bytes_to_read; 
+	page_pin (upage);
+	lock_filesys ();
+	num_read = file_read (file_, buffer, page_read_bytes);
+	unlock_filesys ();
+	page_unpin (upage);
+	
+	size -= page_read_bytes;
+	buffer += page_read_bytes;
+	upage += PGSIZE;
+	byte_read += num_read;
+      }
+    }
+
   }
   return byte_read;
 }
@@ -434,9 +458,32 @@ static int sys_write (int fd, const void *buffer, unsigned size)
   else {
     /* Get file info*/
     struct file *file_ = t->fd_table[fd];
+    int num_written = 0;
+    int page_write_bytes;
+    uint32_t bytes_to_write;
+    void *upage;
 
-    if (file_ != NULL)
-      byte_written = file_write (file_, buffer, size);
+    //    if (file_ != NULL)
+    //      byte_written = file_write (file_, buffer, size);
+    if (file_ != NULL) {
+      upage = pg_round_down(buffer);
+      byte_written = 0;
+      while (size > 0) {
+	bytes_to_write = PGSIZE - pg_ofs (buffer);
+	page_write_bytes = size < bytes_to_write ? size : bytes_to_write; 
+	page_pin (upage);
+	lock_filesys ();
+	num_written = file_write (file_, buffer, page_write_bytes);
+	unlock_filesys ();
+	page_unpin (upage);
+	
+	size -= page_write_bytes;
+	buffer += page_write_bytes;
+	upage += PGSIZE;
+	byte_written += num_written;
+      }
+    }
+
   }
   return byte_written;
 }
