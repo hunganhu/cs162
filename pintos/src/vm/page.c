@@ -1,4 +1,4 @@
-/* page.c
+/* pintos/src/vm/page.c
 */
 #include <string.h>
 #include <stdio.h>
@@ -34,7 +34,9 @@ page_hash_less (const struct hash_elem *a, const struct hash_elem *b,
   return pa->vaddr < pb->vaddr;
 }
 
-/**
+/*
+  Return a page entry of the thread's supplemental page table for the 
+  specific virtual address. Return NULL if not found.
  */
 struct page *
 page_lookup (struct thread *t, void *vaddr)
@@ -47,6 +49,7 @@ page_lookup (struct thread *t, void *vaddr)
 
   return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
+
 /** allocate a page entry for vaddr, initialize the page values and  insert
     into thread's supplemental page table.
 */
@@ -85,6 +88,9 @@ struct page *page_alloc (void *vaddr, bool writable)
   return vpage;
 }
 
+/* release a page is to delete the entry in thread's supplemental page, reset
+   the swap slots and free the resource allocated.
+*/
 void page_release (struct page *vpage)
 {
   struct thread *t = thread_current();
@@ -101,6 +107,7 @@ void page_release (struct page *vpage)
   free(vpage);
 }
 
+/* pin a virtual page such that it will not be evicted */
 void page_pin (void *page_vaddr)
 {
   struct page *vpage;
@@ -128,6 +135,7 @@ void page_pin (void *page_vaddr)
   }
 }
 
+/* Unpin a virtual page such that it can be evicted */
 void page_unpin (void *page_vaddr)
 {
   struct page *vpage;
@@ -223,7 +231,17 @@ bool page_in (void *vaddr)
   }
   return success;
 }
-
+/** page_out algorithm
+    1. check the virtual page is valid or not
+    2. check the dirty bit by the dirty flag on the thread's page table.
+    3. if dirty, write the page content to disk accordig the type of 
+       mmap, file, or stack.
+    4. for stack, write to swap disk and mark the dirty bit.
+    5. for file (private=F), write to swap disk and mark the dirty bit.
+    6. for mmap file (file != NULL and mmap_id != -1), write the content to 
+       file system and clear the dirty bit.
+    7. clear the page table entry to "not present".
+ */
 bool page_out (struct page *vpage)
 {
   //check if the page frame is null
@@ -284,6 +302,7 @@ bool page_out (struct page *vpage)
   return success;
 }
 
+/* return the access flag on thread's page table entry */
 bool page_is_accessed (struct page *vpage)
 {
   //call function pagedir_is_accessed to check if it has been recently 
@@ -291,11 +310,13 @@ bool page_is_accessed (struct page *vpage)
   return pagedir_is_accessed (vpage->thread->pagedir, vpage->vaddr);
 }
 
+/* set the access flag to "accessed" on thread's page table entry */
 void page_set_accessed (struct page *vpage, bool accessed)
 {
    pagedir_set_accessed (vpage->thread->pagedir, vpage->vaddr, accessed);
 }
 
+/* return the dirty flag on thread's page table entry */
 bool page_is_dirty (struct page *vpage)
 {
   //check if the page frame is null
@@ -319,6 +340,10 @@ void page_destroy (struct hash_elem *e, void *aux UNUSED)
   free (pg);
 }
 
+/*
+  Return the entry of thread's mmap list by mapid. Return null if mapid is not
+  found
+*/
 struct mmap *mmap_get_id(mapid_t mapid) 
 {
   struct thread *t = thread_current();
@@ -334,7 +359,10 @@ struct mmap *mmap_get_id(mapid_t mapid)
   }
   return NULL;
 }
-
+/*
+  Remove a mmap file. Write the content in memory to file system and free the 
+  allocated resource.
+*/
 void page_munmap (struct mmap *mmap)
 {
   /*free thread's supplemental page table*/

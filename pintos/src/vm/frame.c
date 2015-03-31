@@ -1,4 +1,4 @@
-/* frame.c
+/* pintos/src/vm/frame.c
    Provide programs with free frames when needed
 */
 #include <stdio.h>

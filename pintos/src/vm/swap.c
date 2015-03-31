@@ -1,4 +1,4 @@
-/* swap.c
+/* pintos/src/vm/swap.c
  */
 
 #include <bitmap.h>
@@ -18,7 +18,12 @@
 static struct block  *swap_device;
 static struct bitmap *swap_bitmap;
 static struct lock   swap_lock;
-
+/* 
+  Initial swap device
+  1. assign swap device
+  2. create swap slot table by bitmap
+  3. initial lock
+*/
 void swap_init(void)
 {
   swap_device = block_get_role(BLOCK_SWAP);
@@ -38,7 +43,10 @@ void swap_init(void)
 	  block_size(swap_device), bitmap_size(swap_bitmap), PAGE_BLOCKS);
   //bitmap_dump(swap_bitmap);
 }
-
+/*
+   Load the content of the virtual page from swap disk, and clear the swap
+   slots it occupied.
+ */
 void swap_in(struct page *vpage)
 {
   int i = 0;
@@ -67,7 +75,9 @@ void swap_in(struct page *vpage)
   vpage->swap_slot = (block_sector_t) -1;
   //bitmap_dump(swap_bitmap);
 }
-
+/*
+  Allocate free swap slots and write content of virtual page to swap disk
+ */
 block_sector_t swap_out(struct page *vpage)
 {
   size_t swap_idx;
@@ -96,6 +106,10 @@ block_sector_t swap_out(struct page *vpage)
   return swap_idx;
 }
 
+/*
+  Reset the swap slots that a virtual page has been resident in. It is called
+  when a process exits and destroy is page table.
+ */
 void swap_clear (struct page *vpage)
 {
   ASSERT (vpage->private);
