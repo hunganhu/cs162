@@ -71,6 +71,7 @@ struct page *page_alloc (void *vaddr, bool writable)
   vpage->writable = writable;
   vpage->frame = NULL;
   vpage->private = false; // page source from file
+  vpage->dirty = false;   // initial to clean
   vpage->swap_slot = (block_sector_t) -1;
   vpage->mmap_id = MAP_FAILED;
   vpage->file = NULL;
@@ -173,6 +174,11 @@ bool page_in (void *vaddr)
 
   if (vpage->private) {
     // do swap in
+    if (SWAP_ON) {
+      printf ("SwapIn=%p, frame=%p, slot=%d, private=%s.\n", 
+	      vpage->vaddr, vpage->frame->kpage, vpage->swap_slot,
+	      vpage->private == true? "T" : "F");
+    }
     swap_in(vpage);
     success = true;
   } else if (vpage->file == NULL) {
@@ -235,13 +241,26 @@ bool page_out (struct page *vpage)
 	 vpage->private? "T" : "F",
 	 vpage->file, vpage->file_ofs, vpage->read_bytes, vpage->zero_bytes);
 
-  if (page_is_dirty(vpage)) {
+  vpage->dirty |= page_is_dirty (vpage);
+  if (vpage->dirty) {
     if (vpage->file == NULL) { 
       // page source is stack
       swap_out(vpage);
+      if (SWAP_ON) {
+	// load content of vpage from swap disk
+	printf ("SwapOut(STACK)=%p, slot=%d, private=%s.\n ", 
+		vpage->vaddr, vpage->swap_slot,
+		vpage->private == true? "T" : "F");
+      }
     } else if (vpage->file != NULL && vpage->mmap_id == MAP_FAILED){
       // page source is file
       swap_out(vpage);
+      if (SWAP_ON) {
+	// load content of vpage from swap disk
+	printf ("SwapOut(FILE)=%p, slot=%d, private=%s.\n ", 
+		vpage->vaddr, vpage->swap_slot,
+		vpage->private == true? "T" : "F");
+      }
     } else if (vpage->file != NULL && vpage->mmap_id != MAP_FAILED) {
       //page source is mmap, write the dirty page to mmap file
       lock_filesys();
@@ -252,6 +271,7 @@ bool page_out (struct page *vpage)
 	success = false; 
       } else {
 	pagedir_set_dirty (t->pagedir, vpage->vaddr, false);
+	vpage->dirty = false;
       }
       unlock_filesys();
     }
@@ -292,8 +312,6 @@ void page_destroy (struct hash_elem *e, void *aux UNUSED)
   /** release frame table */
   if (pg->frame != NULL)
     frame_release (pg->frame);
-  //DEBUG ("page =0x%08"PRIx32" {vaddr=0x%08"PRIx32", frame=0x%08"PRIx32"}\n",
-  //	 (unsigned)pg, (unsigned)pg->vaddr, (unsigned)pg->frame);
 
   /** free swap slots if the page has been swaped out */
   if (pg->private)

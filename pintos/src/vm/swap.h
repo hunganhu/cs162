@@ -3,6 +3,8 @@
 
 #include "vm/page.h"
 #include "vm/frame.h"
+#define SWAP_ON false
+#define PAGE_BLOCKS (PGSIZE / BLOCK_SECTOR_SIZE)
 
 void swap_init(void);
 void swap_in(struct page *vpage);

@@ -155,14 +155,14 @@ page_fault (struct intr_frame *f)
   // if page fault come from user, save its stack pointer
   if (f->cs == SEL_UCSEG)
     t->stack_pointer = f->esp;
-  /*
+
   DEBUG ("Page fault at %p: %s error %s page in %s context, thread(%p), esp(%p).\n",
 	  fault_addr,
 	  not_present ? "not present" : "rights violation",
 	  write ? "writing" : "reading",
 	  user ? "user" : "kernel",
 	  t, t->stack_pointer);
-  */
+
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
