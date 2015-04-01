@@ -26,7 +26,6 @@ void frame_init (void)
   clock_hand =  list_begin (&frame_table);
 
   /* initial frame table to allocate all available pages in the user pool */
-  DEBUG ("Initial frames.\n");
   lock_acquire (&frame_lock);
   while ((kpage = palloc_get_page(PAL_USER|PAL_ZERO)) != (void *)NULL) {
     frame = malloc(sizeof(struct frame)); /*malloc a frame*/
@@ -40,7 +39,6 @@ void frame_init (void)
     }
     /*append to frame table list*/
     list_push_back(&frame_table, &frame->frame_elem);
-    //DEBUG ("Frame[%03d]=0x%08"PRIx32".\n", i++, (uint32_t) frame->kpage);
   }
   lock_release (&frame_lock);  
 }
@@ -55,19 +53,25 @@ struct frame *frame_alloc (struct page *vpage)
 {
   struct list_elem *e;
   struct frame *frame;
+  bool found = false;
 
+  lock_acquire (&frame_lock);
   for (e = list_begin (&frame_table); e != list_end (&frame_table); 
        e = list_next (e)) {
     frame = list_entry(e, struct frame, frame_elem);
     if (frame->vpage == NULL) {
       frame->vpage = vpage;
-       return frame;
+      found = true;
+      break;
     }
   }
+  lock_release (&frame_lock);
 
-  /* no free frame found */
-  frame = frame_victim (vpage);
-  //  DEBUG ("Alloc Frame=0x%08"PRIx32".\n",(uint32_t) frame->kpage);
+  if (!found) {
+    /* no free frame found */
+    frame = frame_victim (vpage);
+  }
+
   return frame;
 }
 
@@ -101,9 +105,9 @@ struct frame *frame_victim(struct page *vpage)
     for (e = clock_hand; e != list_end (&frame_table); 
 	 e = list_next (e)) {
       frame = list_entry(e, struct frame, frame_elem);
+
       //consider only not pinned frames and frame owner is me
       if (!frame->pinned && (frame->vpage->thread == cur)) {
-      //if (!frame->pinned) {
 	if (page_is_accessed (frame->vpage)) {
 	  page_set_accessed (frame->vpage, false);
 	} else {
@@ -124,13 +128,12 @@ struct frame *frame_victim(struct page *vpage)
 
   // return a frame with the new page
   frame->vpage = vpage;
-  /*
-  DEBUG ("Return Frame=0x%08"PRIx32", Vpage==0x%08"PRIx32","
+
+  DEBUG ("Victim Frame=0x%08"PRIx32", Vpage==0x%08"PRIx32","
 	  " accessed=%s, dirty=%s.\n", 
 	  (uint32_t) frame->kpage, (uint32_t) frame->vpage->vaddr,
 	  page_is_accessed (vpage) ? "T" : "F",
 	  page_is_dirty (vpage) ? "T" : "F");
-  */
+
   return frame;
 }
-

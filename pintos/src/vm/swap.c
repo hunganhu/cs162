@@ -41,7 +41,6 @@ void swap_init(void)
   lock_init (&swap_lock);
   DEBUG ("Swap Init, Disk size=%d sector, Bitmap size=%d, Page blocks=%d.\n",
 	  block_size(swap_device), bitmap_size(swap_bitmap), PAGE_BLOCKS);
-  //bitmap_dump(swap_bitmap);
 }
 /*
    Load the content of the virtual page from swap disk, and clear the swap
@@ -73,7 +72,6 @@ void swap_in(struct page *vpage)
   //update vpage meta data
   vpage->private = false;
   vpage->swap_slot = (block_sector_t) -1;
-  //bitmap_dump(swap_bitmap);
 }
 /*
   Allocate free swap slots and write content of virtual page to swap disk
