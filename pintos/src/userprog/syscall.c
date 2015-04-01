@@ -64,22 +64,28 @@ syscall_init (void)
 void 
 lock_filesys() 
 {
+  //lock_acquire (&filesys_lock);
+  
   struct thread *t = thread_current();
   if(lock_held_by_current_thread (&filesys_lock)) {
     sema_up (&t->process->sema_disk); // raise semaphore lock has been hold 
   } else {
     lock_acquire (&filesys_lock);
   }
+  
 }
 
 void 
 unlock_filesys()
 {
+  //  lock_release (&filesys_lock);
+  
   struct thread *t = thread_current();
   //if semaphore is up, do not release lock.
   if (!sema_try_down(&t->process->sema_disk)) {
     lock_release (&filesys_lock);
   }
+  
 }
 
 static void
@@ -93,8 +99,6 @@ syscall_handler (struct intr_frame *f UNUSED)
   syscall_no = (int) arg0;
   t->stack_pointer = f->esp;
 
-  /* Synchronize syscall operation */
-  //  lock_acquire (&syscall_lock);
   switch (syscall_no)
     {
     case SYS_HALT:                   /* 0 Halt the operating system. */
@@ -115,27 +119,19 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CREATE:                 /* Create a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
-      lock_filesys();
-       f->eax = sys_create((char *) arg1, (unsigned) arg2);
-      unlock_filesys();
+      f->eax = sys_create((char *) arg1, (unsigned) arg2);
       break;
      case SYS_REMOVE:                 /* 5 Delete a file. */
       arg1 = read_argument(f, 1);
-      lock_filesys();
       f->eax = sys_remove((char *) arg1);
-      unlock_filesys();
       break;
     case SYS_OPEN:                   /* Open a file. */
       arg1 = read_argument(f, 1);
-      lock_filesys();
       f->eax = sys_open((char *) arg1);
-      unlock_filesys();
       break;
     case SYS_FILESIZE:               /* Obtain a file's size. */
       arg1 = read_argument(f, 1);
-      lock_filesys();
       f->eax = sys_filesize((int) arg1);
-      unlock_filesys();
       break;
     case SYS_READ:                   /* Read from a file. */
       arg1 = read_argument(f, 1);
@@ -152,21 +148,15 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_SEEK:                   /* 10 Change position in a file. */
       arg1 = read_argument(f, 1);
       arg2 = read_argument(f, 2);
-      lock_filesys();
       sys_seek((int) arg1, (unsigned) arg2);
-      unlock_filesys();
       break;
     case SYS_TELL:                   /* Report current position in a file. */
       arg1 = read_argument(f, 1);
-      lock_filesys();
       f->eax = sys_tell((int) arg1);
-      unlock_filesys();
       break;
     case SYS_CLOSE:                  /* Close a file. */
       arg1 = read_argument(f, 1);
-      lock_filesys();
       sys_close((int) arg1);
-      unlock_filesys();
       break;
 
     /* Project 3 and optionally project 4. */
@@ -219,7 +209,6 @@ syscall_handler (struct intr_frame *f UNUSED)
     default:
       break;
     }
-  //  lock_release(&syscall_lock);
 }
 
 /* Check validity of buffer starting at vaddr, with length of size*/
@@ -323,10 +312,12 @@ static bool sys_create (const char *file, unsigned initial_size)
 
   bool success = false;
   // the name of file cannot be empty and cannot be existed
+  lock_filesys();
   if (filesys_open(file) == NULL)
     success = filesys_create (file, initial_size);
   else
     success = false;
+  unlock_filesys();
   return success;
 }
 
@@ -337,9 +328,11 @@ static bool sys_remove (const char *file)
     sys_exit(-1);
 
   bool success = false;
+  lock_filesys();
   if (filesys_open(file) != NULL) {
     success = filesys_remove (file);
   }
+  unlock_filesys();
   return success;
 
 }
@@ -353,7 +346,9 @@ static int sys_open (const char *file)
   struct thread *t = thread_current ();
  
   /* Get file info*/
+  lock_filesys();
   struct file *file_ = filesys_open(file);
+  unlock_filesys();
   int fd = -1;
 
   if (file_ != NULL) {
@@ -376,7 +371,9 @@ static int sys_filesize (int fd)
   struct file *file_ = t->fd_table[fd];
   
   if (file_ != NULL) {
+    lock_filesys();
     size = file_length(file_);
+    unlock_filesys();
   }
   return size;
 }
@@ -498,8 +495,11 @@ static void sys_seek (int fd, unsigned position)
   /* Get file info*/
   struct file *file_ = t->fd_table[fd];
   
-  if (file_ != NULL)
+  if (file_ != NULL) {
+    lock_filesys();
     file_seek(file_, position);
+    unlock_filesys();
+  }
 }
 
 static int sys_tell (int fd)
@@ -514,9 +514,11 @@ static int sys_tell (int fd)
   /* Get file info*/
   struct file *file_ = t->fd_table[fd];
   
-  if (file_ != NULL)
+  if (file_ != NULL) {
+    lock_filesys();
     position = file_tell(file_);
-
+    unlock_filesys();
+  }
   return position;
 }
 
@@ -532,7 +534,9 @@ static void sys_close (int fd)
   struct file *file_ = t->fd_table[fd];
   
   if (file_ != NULL) {
+    lock_filesys();
     file_close(file_);
+    unlock_filesys();
     t->fd_table[fd] = NULL;
   }
 }
