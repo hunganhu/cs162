@@ -13,7 +13,6 @@
 #define CDEBUG  if (CACHE_ON) printf
 
 #define BUFFER_CACHE_SIZE 64
-
 #define CACHE_DELAYED 0x1  /* the buffer is delayed write */
 #define CACHE_BUSY    0x2  /* the buffer is selected to be r/w, cannot evict */
 #define CACHE_FLUSH   0x4  /* the buffer is flushing */
@@ -50,8 +49,8 @@ bool buffer_is_delayed (struct cache_entry *buffer);
 void buffer_set_delayed (struct cache_entry *buffer, bool flag);
 bool buffer_is_busy (struct cache_entry *buffer);
 void buffer_set_busy (struct cache_entry *buffer, bool flag);
-bool buffer_is_flush (struct cache_entry *buffer);
-void buffer_set_flush (struct cache_entry *buffer, bool flag);
+//bool buffer_is_flush (struct cache_entry *buffer);
+//void buffer_set_flush (struct cache_entry *buffer, bool flag);
 bool buffer_is_wait (struct cache_entry *buffer);
 void buffer_set_wait (struct cache_entry *buffer, bool flag);
 

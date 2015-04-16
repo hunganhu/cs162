@@ -107,15 +107,18 @@ struct cache_entry *cache_get_buffer (block_sector_t sector)
     buffer = cache_lookup (sector);
     if (buffer != NULL) {
       if (buffer_is_busy(buffer)) {  //scenario 5
+	buffer_set_wait (buffer, true);
 	sema_down (&buffer->sema_buf);  // wait event the buffer becomes free  
 	continue;
       }
       //disable interrupt while manuplating the free list
-      old_level = intr_disable (); //scenario 1
-      list_push_front (&list_lru, &buffer->list_elem); //push to front free list
-      list_pop_front (&list_lru);
-      intr_set_level (old_level);
+      if (sector > ROOT_DIR_SECTOR) {
+	old_level = intr_disable (); //scenario 1
+	list_remove (&buffer->list_elem);
+	intr_set_level (old_level);
+      }
       cache_lock (buffer);
+
       found = true;
     } else { // block not on hash queue
       if (list_empty (&list_lru)) {        //scenario 4
@@ -151,35 +154,35 @@ void cache_release (struct cache_entry *buffer)
 {
   enum intr_level old_level;
   
-  //disable interrupt while manuplating the free list
-  cache_unlock (buffer);
-
   // FREE_MAP_SECTOR and ROOT_DIR_SECTOR are pinned in buffer cache
   if (buffer->sector > ROOT_DIR_SECTOR) {
+    //disable interrupt while manuplating the free list
     old_level = intr_disable ();
-    //list_push_back (&list_lru, &buffer->list_elem);
-    if (buffer->sector != (block_sector_t) -1 && !buffer_is_flush(buffer))
-      list_push_back (&list_lru, &buffer->list_elem);
-    else
-      list_push_front (&list_lru, &buffer->list_elem);
+    list_push_back (&list_lru, &buffer->list_elem);
     intr_set_level (old_level);
 
+    if (buffer_is_wait (buffer)) {
+      buffer_set_wait (buffer, false);
+    }
     sema_up (&sema_lru);
-    sema_up (&buffer->sema_buf);
   }
+  cache_unlock (buffer);
 }
 
 /* Lock the cache entry */
 void cache_lock (struct cache_entry *buffer)
 {
   buffer_set_busy(buffer, true);
+  CDEBUG ("Sema down buffer.\n");
+  sema_down (&buffer->sema_buf);
 }
 
 /* Unlock the cache entry */
 void cache_unlock (struct cache_entry *buffer)
 {
-  if (buffer_is_busy(buffer))
-    buffer_set_busy(buffer, false);
+  buffer_set_busy(buffer, false);
+  CDEBUG ("Sema up buffer.\n");
+  sema_up (&buffer->sema_buf);
 }
 
 void cache_evict (void)
@@ -188,15 +191,13 @@ void cache_evict (void)
 
 void cache_flush_buffer (struct cache_entry *buffer)
 {
-  buffer_set_flush(buffer, true);
+  cache_lock (buffer);
   //initiate disk write
   CDEBUG ("cache-flush: buffer[%d] to %s[%d].\n", buffer->seq,
 	  block_type_name(block_type(fs_device)), buffer->sector);
   block_write (fs_device, buffer->sector, buffer->data);
-  buffer_set_flush(buffer, false);
   buffer_set_delayed(buffer, false);
-  cache_release (buffer);
-
+  cache_unlock (buffer);
 }
 
 void cache_flush_cache (void)
@@ -311,7 +312,7 @@ void buffer_set_busy (struct cache_entry *buffer, bool flag)
   else
     buffer->status &= ~CACHE_BUSY;
 }  
-
+/*
 bool buffer_is_flush (struct cache_entry *buffer)
 {
   return buffer->status & CACHE_FLUSH;
@@ -323,7 +324,7 @@ void buffer_set_flush (struct cache_entry *buffer, bool flag)
   else
     buffer->status &= ~CACHE_FLUSH;
 }  
-
+*/
 bool buffer_is_wait (struct cache_entry *buffer)
 {
   return buffer->status & CACHE_WAIT;
