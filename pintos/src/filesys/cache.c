@@ -84,7 +84,8 @@ cache_lookup (block_sector_t sector)
 
   return e != NULL ? hash_entry (e, struct cache_entry, hash_elem) : NULL;
 }
-/* Scenarios for retrieval of a buffer
+/* Scenarios for retrieval of a buffer (see chapter 3 Buffer Cache of 
+   the Design of the Unix Operating System, Maurice J. Bach)
    1. The kernel find the block on its hash queue, and its buffer is free
    2. The kernel cannot find the block on the hash queue, so it allocates a
       buffer from the free list.
@@ -106,9 +107,9 @@ struct cache_entry *cache_get_buffer (block_sector_t sector)
   while (!found) {
     buffer = cache_lookup (sector);
     if (buffer != NULL) {
-      if (buffer_is_busy(buffer)) {  //scenario 5
-	buffer_set_wait (buffer, true);
-	sema_down (&buffer->sema_buf);  // wait event the buffer becomes free  
+      cache_lock (buffer); //scenario 5, wait event the buffer becomes free 
+      if (buffer->sector != sector) { // reckeck the sector after wait up
+	cache_unlock (buffer);        // if not, re-search   
 	continue;
       }
       //disable interrupt while manuplating the free list
@@ -117,7 +118,6 @@ struct cache_entry *cache_get_buffer (block_sector_t sector)
 	list_remove (&buffer->list_elem);
 	intr_set_level (old_level);
       }
-      cache_lock (buffer);
 
       found = true;
     } else { // block not on hash queue
@@ -130,6 +130,11 @@ struct cache_entry *cache_get_buffer (block_sector_t sector)
       buffer = list_entry(list_pop_front(&list_lru), struct cache_entry,
 			  list_elem);
       intr_set_level (old_level);
+      if (buffer == NULL)
+	continue;
+      else
+	cache_lock (buffer);
+
       if (buffer_is_delayed (buffer)) { //scenario 3
 	// asynchronous write buffer to disk
 	cache_flush_buffer (buffer);
@@ -138,7 +143,6 @@ struct cache_entry *cache_get_buffer (block_sector_t sector)
       //scenarion 2: found a free buffer
       lock_acquire (&lock_buffercache);
       hash_delete (&buffer_cache, &buffer->hash_elem);
-      cache_lock (buffer);
       lock_release (&lock_buffercache);
 
       found = true;
@@ -191,25 +195,25 @@ void cache_evict (void)
 
 void cache_flush_buffer (struct cache_entry *buffer)
 {
-  cache_lock (buffer);
   //initiate disk write
   CDEBUG ("cache-flush: buffer[%d] to %s[%d].\n", buffer->seq,
 	  block_type_name(block_type(fs_device)), buffer->sector);
   block_write (fs_device, buffer->sector, buffer->data);
   buffer_set_delayed(buffer, false);
-  cache_unlock (buffer);
 }
 
 void cache_flush_cache (void)
 {
-  struct list_elem *e;
   struct cache_entry *buffer;
+  struct hash_iterator i;
 
-  for (e = list_begin(&list_lru); e != list_end (&list_lru);
-       e = list_next (e)) {
-    buffer = list_entry(e, struct cache_entry, list_elem);
+  hash_first (&i, &buffer_cache);
+  while (hash_next (&i)) {
+    buffer = hash_entry (hash_cur (&i), struct cache_entry, hash_elem);
     if (buffer != NULL && buffer->status == CACHE_DELAYED) {
+      cache_lock (buffer);
       cache_flush_buffer (buffer);
+      cache_unlock (buffer);
     }
   }
 }
@@ -234,7 +238,6 @@ static struct cache_entry
   return buffer1; 
 }
 /* block read
-
  */
 static struct cache_entry *bread (struct block *block, block_sector_t sector)
 {

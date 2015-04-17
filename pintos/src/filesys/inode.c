@@ -369,8 +369,11 @@ inode_flush (struct inode *inode)
   // flush inode
   buffer = cache_lookup (inode->sector);
   if (buffer != NULL) {
-    if (buffer_is_delayed(buffer))
+    if (buffer_is_delayed(buffer)) {
+      cache_lock (buffer);
       cache_flush_buffer (buffer);
+      cache_unlock (buffer);
+    }
   }
 
   // flush inode data
@@ -378,8 +381,11 @@ inode_flush (struct inode *inode)
   for (sector = inode->data.start; sector < sector_end; sector++) {
     buffer = cache_lookup (sector);
     if (buffer != NULL) {
-      if (buffer_is_delayed(buffer))
+      if (buffer_is_delayed(buffer)) {
+	cache_lock (buffer);
 	cache_flush_buffer (buffer);
+	cache_unlock (buffer);
+      }
     }
   } 
 }
