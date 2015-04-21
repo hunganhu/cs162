@@ -370,9 +370,9 @@ inode_flush (struct inode *inode)
   buffer = cache_lookup (inode->sector);
   if (buffer != NULL) {
     if (buffer_is_delayed(buffer)) {
-      cache_lock (buffer);
+      acquire_shared (&buffer->lock_shared);
       cache_flush_buffer (buffer);
-      cache_unlock (buffer);
+      release_shared (&buffer->lock_shared);
     }
   }
 
@@ -382,9 +382,9 @@ inode_flush (struct inode *inode)
     buffer = cache_lookup (sector);
     if (buffer != NULL) {
       if (buffer_is_delayed(buffer)) {
-	cache_lock (buffer);
+	acquire_shared (&buffer->lock_shared);
 	cache_flush_buffer (buffer);
-	cache_unlock (buffer);
+	release_shared (&buffer->lock_shared);
       }
     }
   } 

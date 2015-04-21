@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include "devices/timer.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
 #include "threads/malloc.h"
@@ -16,16 +17,15 @@ struct list list_lru;         /* free list preserves the LRU order */
 struct semaphore sema_lru;    /* event to indicate a free buffer is available */
 struct lock lock_buffercache; /* lock when accessing buffer cache hash table */
 
-static struct cache_entry *bread (struct block *block, block_sector_t sector);
-static void bwrite (struct cache_entry *buffer);
-static struct cache_entry *breada (struct block *block, block_sector_t sector,
-				   block_sector_t sector_next);
+//static struct cache_entry *breada (struct block *block, block_sector_t sector,
+//				   block_sector_t sector_next);
 
 /* cache buffer initial do:
    1. create hash table
    2. create free list
    3. initial semaphore sema_lru
    4. allocate kernel pages of 64 block size and assign to free list
+   5. initial a thread to flush cache buffer periodically
 */
 void cache_init (void)
 {
@@ -44,8 +44,12 @@ void cache_init (void)
     memset (buffer->data, 0, BLOCK_SECTOR_SIZE);
     buffer->status = 0;
     sema_init (&buffer->sema_buf, 1);
+    init_shared (&buffer->lock_shared);
     list_push_back (&list_lru, &buffer->list_elem);
   }
+  /*Initial a thread to flush cache buffer every one second. */
+  /*TODO: after adding this thread, cases with concurrent processes are failed*/
+  thread_create ("CACHE_FLUSH", PRI_DEFAULT, cache_flush_cache, NULL);
 }
 
 /* Return the hash value of the hash element ce on the value of sector. */
@@ -107,9 +111,10 @@ struct cache_entry *cache_get_buffer (block_sector_t sector)
   while (!found) {
     buffer = cache_lookup (sector);
     if (buffer != NULL) {
-      cache_lock (buffer); //scenario 5, wait event the buffer becomes free 
+      //scenario 5, wait event the buffer becomes free 
+      acquire_exclusive (&buffer->lock_shared);
       if (buffer->sector != sector) { // reckeck the sector after wait up
-	cache_unlock (buffer);        // if not, re-search   
+	release_exclusive (&buffer->lock_shared);
 	continue;
       }
       //disable interrupt while manuplating the free list
@@ -132,13 +137,14 @@ struct cache_entry *cache_get_buffer (block_sector_t sector)
       intr_set_level (old_level);
       if (buffer == NULL)
 	continue;
-      else
-	cache_lock (buffer);
-
-      if (buffer_is_delayed (buffer)) { //scenario 3
-	// asynchronous write buffer to disk
-	cache_flush_buffer (buffer);
-	//continue;
+      else {
+	if (buffer_is_delayed (buffer)) { //scenario 3
+	  // asynchronous write buffer to disk
+	  acquire_shared (&buffer->lock_shared);
+	  cache_flush_buffer (buffer);
+	  release_shared (&buffer->lock_shared);
+	}
+	acquire_exclusive (&buffer->lock_shared);
       }
       //scenarion 2: found a free buffer
       lock_acquire (&lock_buffercache);
@@ -164,63 +170,47 @@ void cache_release (struct cache_entry *buffer)
     old_level = intr_disable ();
     list_push_back (&list_lru, &buffer->list_elem);
     intr_set_level (old_level);
-
-    if (buffer_is_wait (buffer)) {
-      buffer_set_wait (buffer, false);
-    }
     sema_up (&sema_lru);
   }
-  cache_unlock (buffer);
-}
-
-/* Lock the cache entry */
-void cache_lock (struct cache_entry *buffer)
-{
-  buffer_set_busy(buffer, true);
-  CDEBUG ("Sema down buffer.\n");
-  sema_down (&buffer->sema_buf);
-}
-
-/* Unlock the cache entry */
-void cache_unlock (struct cache_entry *buffer)
-{
-  buffer_set_busy(buffer, false);
-  CDEBUG ("Sema up buffer.\n");
-  sema_up (&buffer->sema_buf);
-}
-
-void cache_evict (void)
-{
+  release_exclusive (&buffer->lock_shared);
 }
 
 void cache_flush_buffer (struct cache_entry *buffer)
 {
   //initiate disk write
-  CDEBUG ("cache-flush: buffer[%d] to %s[%d].\n", buffer->seq,
-	  block_type_name(block_type(fs_device)), buffer->sector);
   block_write (fs_device, buffer->sector, buffer->data);
   buffer_set_delayed(buffer, false);
+  CDEBUG ("cache-flush: buffer[%d] to %s[%d].\n", buffer->seq,
+	  block_type_name(block_type(fs_device)), buffer->sector);
 }
 
-void cache_flush_cache (void)
+void cache_flush_cache (void *AUX UNUSED)
 {
   struct cache_entry *buffer;
   struct hash_iterator i;
 
-  hash_first (&i, &buffer_cache);
-  while (hash_next (&i)) {
-    buffer = hash_entry (hash_cur (&i), struct cache_entry, hash_elem);
-    if (buffer != NULL && buffer->status == CACHE_DELAYED) {
-      cache_lock (buffer);
-      cache_flush_buffer (buffer);
-      cache_unlock (buffer);
+  for (;;) {
+    timer_sleep (TIMER_FREQ / 5); // sleep one second
+    CDEBUG ("***** wake up after 0.2 second.\n");
+    lock_acquire (&lock_buffercache);
+    hash_first (&i, &buffer_cache);
+    while (hash_next (&i)) {
+      buffer = hash_entry (hash_cur (&i), struct cache_entry, hash_elem);
+      if (buffer != NULL && buffer_is_delayed(buffer)) {
+	acquire_shared (&buffer->lock_shared);
+	cache_flush_buffer (buffer);
+	release_shared (&buffer->lock_shared);
+	CDEBUG ("daemon-flush: buffer[%d] to %s[%d].\n", buffer->seq,
+		block_type_name(block_type(fs_device)), buffer->sector);
+      }
     }
+    lock_release (&lock_buffercache);
   }
 }
 
 /*
-block read ahead
-*/
+//block read ahead
+
 static struct cache_entry 
 *breada (struct block *block, block_sector_t sector, block_sector_t sector_next)
 {
@@ -237,11 +227,13 @@ static struct cache_entry
   }
   return buffer1; 
 }
-/* block read
- */
-static struct cache_entry *bread (struct block *block, block_sector_t sector)
+*/
+
+void cache_block_read (struct block *block, block_sector_t sector, void *data)
 {
   struct cache_entry *buffer;
+  enum intr_level old_level;
+
   buffer = cache_get_buffer(sector);
   if (buffer->sector != sector) {
     buffer->sector = sector;
@@ -250,33 +242,20 @@ static struct cache_entry *bread (struct block *block, block_sector_t sector)
     lock_release (&lock_buffercache);
     //initiate disk read
     block_read (block, sector, buffer->data);
-    CDEBUG ("blkread: buffer[%d] from %s[%d].\n", buffer->seq,
-	    block_type_name(block_type(block)), sector);
   }  
-  return buffer;
-}
-/* block write */
-static void bwrite (struct cache_entry *buffer)
-{
-  if (buffer != NULL && buffer->sector != (block_sector_t) -1 ) {
-    lock_acquire (&lock_buffercache);
-    hash_insert (&buffer_cache, &buffer->hash_elem);
-    lock_release (&lock_buffercache);
-    buffer_set_delayed (buffer, true);
-    CDEBUG ("Delayed Write: buffer[%d] to %s[%d].\n", buffer->seq,
-	    block_type_name(block_type(fs_device)), buffer->sector);
-    cache_release (buffer);
-  }
-}
+  /* Before copying data from cache to memory, change the lock to shared mode
+     to allow parallelism
+  */
+  old_level = intr_disable ();
+  cache_release (buffer);
+  acquire_shared (&buffer->lock_shared);
+  intr_set_level (old_level);
 
-void cache_block_read (struct block *block, block_sector_t sector, void *data)
-{
-  struct cache_entry *buffer;
-  buffer =  bread (block, sector);
   memcpy (data, buffer->data, BLOCK_SECTOR_SIZE);
+  release_shared (&buffer->lock_shared);
+
   CDEBUG ("cache-read: buffer[%d] from %s[%d].\n", buffer->seq,
   	  block_type_name(block_type(block)), sector);
-  cache_release (buffer);
 }
 
 void cache_block_write (struct block *block UNUSED, block_sector_t sector,
@@ -288,7 +267,14 @@ void cache_block_write (struct block *block UNUSED, block_sector_t sector,
   CDEBUG ("cache-write: buffer[%d] to %s[%d].\n", buffer->seq, 
   	  block_type_name(block_type(block)), sector);
   memcpy (buffer->data, data, BLOCK_SECTOR_SIZE);
-  bwrite (buffer);
+
+  if (buffer != NULL && buffer->sector != (block_sector_t) -1 ) {
+    lock_acquire (&lock_buffercache);
+    hash_insert (&buffer_cache, &buffer->hash_elem);
+    lock_release (&lock_buffercache);
+    buffer_set_delayed (buffer, true);
+    cache_release (buffer);
+  }
 }
 
 bool buffer_is_delayed (struct cache_entry *buffer)
@@ -315,30 +301,57 @@ void buffer_set_busy (struct cache_entry *buffer, bool flag)
   else
     buffer->status &= ~CACHE_BUSY;
 }  
-/*
-bool buffer_is_flush (struct cache_entry *buffer)
-{
-  return buffer->status & CACHE_FLUSH;
-}  
-void buffer_set_flush (struct cache_entry *buffer, bool flag)
-{
-  if (flag)
-    buffer->status |=  CACHE_FLUSH;
-  else
-    buffer->status &= ~CACHE_FLUSH;
-}  
-*/
-bool buffer_is_wait (struct cache_entry *buffer)
-{
-  return buffer->status & CACHE_WAIT;
-}  
 
-void buffer_set_wait (struct cache_entry *buffer, bool flag)
+void init_shared (struct shared_lock *s)
 {
-  if (flag)
-    buffer->status |=  CACHE_WAIT;
-  else
-    buffer->status &= ~CACHE_WAIT;
-}  
+  s->i = 0;
+  lock_init (&s->lock);
+  cond_init (&s->cond);
+}
 
+/* Acquire lock in shared mode */
+void 
+acquire_shared (struct shared_lock *s)
+{
+  lock_acquire (&s->lock);
+  while (s->i < 0)
+  {
+    cond_wait (&s->cond, &s->lock);
+  }
+  s->i ++;
+  lock_release (&s->lock);
+}
+
+/* Acquire lock in exlusive mode */
+void 
+acquire_exclusive (struct shared_lock *s)
+{
+  lock_acquire (&s->lock);
+  while (s->i)
+  {
+    cond_wait (&s->cond, &s->lock);
+  }
+  s->i = -1;
+  lock_release (&s->lock);
+}
+
+/* Release lock in shared mode */
+void 
+release_shared (struct shared_lock *s)
+{
+  lock_acquire (&s->lock);
+  if (!--s->i) 
+    cond_signal (&s->cond, &s->lock);
+  lock_release (&s->lock);
+}
+
+/* Release lock in exclusive mode */
+void
+release_exclusive (struct shared_lock *s)
+{
+  lock_acquire (&s->lock);
+  s->i = 0;
+  cond_broadcast (&s->cond, &s->lock);
+  lock_release (&s->lock);
+}
 
