@@ -266,7 +266,7 @@ void cache_block_write (struct block *block UNUSED, block_sector_t sector,
   buffer->sector = sector;
   CDEBUG ("cache-write: buffer[%d] to %s[%d].\n", buffer->seq, 
   	  block_type_name(block_type(block)), sector);
-  memcpy (buffer->data, data, BLOCK_SECTOR_SIZE);
+  memcpy (&buffer->data, data, BLOCK_SECTOR_SIZE);
 
   if (buffer != NULL && buffer->sector != (block_sector_t) -1 ) {
     lock_acquire (&lock_buffercache);
