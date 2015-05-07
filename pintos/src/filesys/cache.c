@@ -49,7 +49,7 @@ void cache_init (void)
   }
   /*Initial a thread to flush cache buffer every one second. */
   /*TODO: after adding this thread, cases with concurrent processes are failed*/
-  thread_create ("CACHE_FLUSH", PRI_DEFAULT, cache_flush_cache, NULL);
+  thread_create ("CACHE_FLUSH", PRI_DEFAULT, cache_flush_task, NULL);
 }
 
 /* Return the hash value of the hash element ce on the value of sector. */
@@ -102,7 +102,7 @@ cache_lookup (block_sector_t sector)
    5. The kernel finds the block on the hash queue, but its buffer is currently
       busy.
 */
-struct cache_entry *cache_get_buffer (block_sector_t sector)
+struct cache_entry *cache_get_block (block_sector_t sector)
 {
   bool found = false;
   struct cache_entry *buffer;
@@ -183,29 +183,33 @@ void cache_flush_buffer (struct cache_entry *buffer)
   CDEBUG ("cache-flush: buffer[%d] to %s[%d].\n", buffer->seq,
 	  block_type_name(block_type(fs_device)), buffer->sector);
 }
+void cache_flush_task (void *AUX UNUSED)
+{
+  for (;;) {
+    timer_sleep (TIMER_FREQ); // sleep one second
+    cache_flush_cache ();
+  }
+}
 
-void cache_flush_cache (void *AUX UNUSED)
+void cache_flush_cache (void)
 {
   struct cache_entry *buffer;
   struct hash_iterator i;
 
-  for (;;) {
-    timer_sleep (TIMER_FREQ / 5); // sleep one second
-    CDEBUG ("***** wake up after 0.2 second.\n");
-    lock_acquire (&lock_buffercache);
-    hash_first (&i, &buffer_cache);
-    while (hash_next (&i)) {
-      buffer = hash_entry (hash_cur (&i), struct cache_entry, hash_elem);
-      if (buffer != NULL && buffer_is_delayed(buffer)) {
-	acquire_shared (&buffer->lock_shared);
-	cache_flush_buffer (buffer);
-	release_shared (&buffer->lock_shared);
-	CDEBUG ("daemon-flush: buffer[%d] to %s[%d].\n", buffer->seq,
-		block_type_name(block_type(fs_device)), buffer->sector);
-      }
+  CDEBUG ("***** wake up after 0.2 second.\n");
+  lock_acquire (&lock_buffercache);
+  hash_first (&i, &buffer_cache);
+  while (hash_next (&i)) {
+    buffer = hash_entry (hash_cur (&i), struct cache_entry, hash_elem);
+    if (buffer != NULL && buffer_is_delayed(buffer)) {
+      acquire_shared (&buffer->lock_shared);
+      cache_flush_buffer (buffer);
+      release_shared (&buffer->lock_shared);
+      CDEBUG ("daemon-flush: buffer[%d] to %s[%d].\n", buffer->seq,
+	      block_type_name(block_type(fs_device)), buffer->sector);
     }
-    lock_release (&lock_buffercache);
   }
+  lock_release (&lock_buffercache);
 }
 
 /*
@@ -234,7 +238,7 @@ void cache_block_read (struct block *block, block_sector_t sector, void *data)
   struct cache_entry *buffer;
   enum intr_level old_level;
 
-  buffer = cache_get_buffer(sector);
+  buffer = cache_get_block(sector);
   if (buffer->sector != sector) {
     buffer->sector = sector;
     lock_acquire (&lock_buffercache);
@@ -252,6 +256,7 @@ void cache_block_read (struct block *block, block_sector_t sector, void *data)
   intr_set_level (old_level);
 
   memcpy (data, buffer->data, BLOCK_SECTOR_SIZE);
+  //data = buffer->data;
   release_shared (&buffer->lock_shared);
 
   CDEBUG ("cache-read: buffer[%d] from %s[%d].\n", buffer->seq,
@@ -262,7 +267,7 @@ void cache_block_write (struct block *block UNUSED, block_sector_t sector,
 			const void *data)
 {
   struct cache_entry *buffer;
-  buffer = cache_get_buffer (sector);
+  buffer = cache_get_block (sector);
   buffer->sector = sector;
   CDEBUG ("cache-write: buffer[%d] to %s[%d].\n", buffer->seq, 
   	  block_type_name(block_type(block)), sector);

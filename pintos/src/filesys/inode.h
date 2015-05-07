@@ -5,11 +5,15 @@
 #include "filesys/off_t.h"
 #include "devices/block.h"
 
+#define INODE_TRACE false
+#define IDEBUG if (INODE_TRACE) printf
+
 #define BLOCKS_NUM 125
 #define DIRECT_BEGIN  0
 #define INDIRECT_BEGIN 123
 #define DBL_INDIRECT_BEGIN (DIRECT_BLK_LEN + BLOCK_SLOTS)
 #define DIRECT_BLK_LEN (INDIRECT_BEGIN - DIRECT_BEGIN)
+
 #define INDIRECT_BLK 123
 #define DBL_INDIRECT_BLK 124
 #define BLOCK_SLOTS (BLOCK_SECTOR_SIZE / sizeof (block_sector_t))
@@ -31,10 +35,16 @@ off_t inode_write_at (struct inode *, const void *, off_t size, off_t offset);
 void inode_deny_write (struct inode *);
 void inode_allow_write (struct inode *);
 off_t inode_length (const struct inode *);
+bool inode_is_dir (const struct inode *inode);
+int inode_open_cnt (const struct inode *inode);
 void inode_flush (struct inode *inode);
 block_sector_t inode_alloc_zeros (block_sector_t *sector);
 bool inode_expand_sector (struct inode *inode, block_sector_t pos_sector);
 off_t inode_expand_zero (struct inode *inode, off_t size, off_t offset);
-void inode_release(struct inode *inode);
+void inode_release (struct inode *inode);
+struct inode *inode_open_path (const char *path_name, char *file_name);
+void inode_lock (struct inode *inode);
+void inode_unlock (struct inode *inode);
+bool path_parse (const char *name, char *path, char *last);
 
 #endif /* filesys/inode.h */

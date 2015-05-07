@@ -2,6 +2,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -11,6 +12,7 @@
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #ifdef VM
 #include "vm/frame.h"
 #include "vm/page.h"
@@ -286,12 +288,14 @@ static bool sys_create (const char *file, unsigned initial_size)
     sys_exit(-1);
 
   bool success = false;
+  struct file *file_ptr;
   // the name of file cannot be empty and cannot be existed
   lock_filesys();
-  if (filesys_open(file) == NULL)
+  file_ptr = filesys_open (file);
+  if (file_ptr == NULL)
     success = filesys_create (file, initial_size);
   else
-    success = false;
+    file_close (file_ptr);
   unlock_filesys();
   return success;
 }
@@ -304,9 +308,7 @@ static bool sys_remove (const char *file)
 
   bool success = false;
   lock_filesys();
-  if (filesys_open(file) != NULL) {
-    success = filesys_remove (file);
-  }
+  success = filesys_remove (file);
   unlock_filesys();
   return success;
 
@@ -435,9 +437,7 @@ static int sys_write (int fd, const void *buffer, unsigned size)
     uint32_t bytes_to_write;
     void *upage;
 
-    //    if (file_ != NULL)
-    //      byte_written = file_write (file_, buffer, size);
-    if (file_ != NULL) {
+    if (file_ != NULL && !inode_is_dir(file_get_inode(file_))) {
       upage = pg_round_down(buffer);
       byte_written = 0;
       while (size > 0) {
@@ -455,7 +455,6 @@ static int sys_write (int fd, const void *buffer, unsigned size)
 	byte_written += num_written;
       }
     }
-
   }
   return byte_written;
 }
@@ -549,7 +548,8 @@ static mapid_t sys_mmap (int fd, void *buffer)
   uint8_t *upage = buffer;    /* user virtual page start address*/
 
   // check file existence
-  file = file_reopen(t->fd_table[fd]);
+  //  file = file_reopen(t->fd_table[fd]);
+  file = t->fd_table[fd];
   if (file == NULL)
     return MAP_FAILED;
 
@@ -633,7 +633,29 @@ static bool sys_chdir (const char *dir)
   if (!access_ok (dir, 0))
     sys_exit(-1);
 
-  return false;
+  struct thread *t = thread_current ();
+  char file_name[NAME_MAX + 1];
+  struct inode *inode_path = inode_open_path (dir, file_name);
+  struct inode *inode = NULL;
+  struct dir *working_dir;
+  bool success = false;
+
+  if (inode_path != NULL && *file_name !='\0') {
+    working_dir = dir_open (inode_path);
+    dir_lookup (working_dir, file_name, &inode);
+    dir_close (working_dir);
+  }
+
+  if (inode != NULL) {
+    if (inode_is_dir (inode)) {
+      dir_close (t->cur_dir);
+      t->cur_dir = dir_open (inode);
+      success = true;
+    } else {
+      inode_close (inode);
+    }
+  }
+  return success;
 }
 
 static bool sys_mkdir (const char *dir)
@@ -641,7 +663,13 @@ static bool sys_mkdir (const char *dir)
   /** verify parameters */
   if (!access_ok (dir, 0))
     sys_exit(-1);
+  bool success = false;
 
+  lock_filesys();
+  success = filesys_mkdir (dir);
+
+  unlock_filesys();
+  return success;
   return false;
 }
 
@@ -652,7 +680,18 @@ static bool sys_readdir (int fd, char *name)
       || fd == STDIN_FILENO || fd == STDOUT_FILENO)
     sys_exit(-1);
 
-  return false;
+  struct thread *t = thread_current ();
+  struct file *file = t->fd_table[fd];
+  struct inode *inode;
+  bool success = false;
+
+  if (file != NULL) {
+    inode = file_get_inode (file);
+    if (inode_is_dir (inode)) {
+      success = dir_listdir (file->dir, name);
+    }
+  }
+  return success;
 }
 
 static bool sys_isdir (int fd)
@@ -661,7 +700,16 @@ static bool sys_isdir (int fd)
   if (!valid_user_fd(fd) || fd == STDIN_FILENO || fd == STDOUT_FILENO)
     sys_exit(-1);
 
-  return false;
+  struct thread *t = thread_current ();
+  bool isdir = false;
+
+  /* Get file info*/
+  struct file *file_ = t->fd_table[fd];
+  
+  if (file_ != NULL)
+    isdir = inode_is_dir (file_get_inode (file_));
+
+  return isdir;
 }
 
 static int sys_isnumber (int fd)
@@ -669,10 +717,19 @@ static int sys_isnumber (int fd)
   /** verify parameters */
   if (!valid_user_fd(fd) || fd == STDIN_FILENO || fd == STDOUT_FILENO)
     sys_exit(-1);
+  struct thread *t = thread_current ();
+  int inumber = -1;
 
-  int inode = -1;
+  /* Get file info*/
+  struct file *file_ = t->fd_table[fd];
+  
+  if (file_ != NULL) {
+    lock_filesys();
+    inumber = inode_get_inumber (file_get_inode (file_));
+    unlock_filesys();
+  }
 
-  return inode;
+  return inumber;
 }
 
 /* Reads a byte at user virtual address UADDR.

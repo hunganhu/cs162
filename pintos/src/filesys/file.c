@@ -1,6 +1,7 @@
 #include "filesys/file.h"
 #include <debug.h>
 #include "filesys/inode.h"
+#include "filesys/directory.h"
 #include "threads/malloc.h"
 
 /* Opens a file for the given INODE, of which it takes ownership,
@@ -15,6 +16,9 @@ file_open (struct inode *inode)
       file->inode = inode;
       file->pos = 0;
       file->deny_write = false;
+      file->dir = NULL;
+      if (inode_is_dir (inode))
+	file->dir = dir_open (inode);
       return file;
     }
   else
@@ -40,7 +44,11 @@ file_close (struct file *file)
   if (file != NULL)
     {
       file_allow_write (file);
-      inode_close (file->inode);
+      if (inode_is_dir (file->inode))
+	dir_close (file->dir);
+      else
+	inode_close (file->inode);
+
       free (file); 
     }
 }

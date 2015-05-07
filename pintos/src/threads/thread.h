@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <hash.h>
 #include "threads/synch.h"
+#include "filesys/directory.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -124,6 +125,7 @@ struct thread
     int8_t nice;                        /** nice value, initial to 0 */
     int64_t recent_cpu;                 /** total ticks running in fixed-point
 					    format, initial to 0 */
+    struct dir *cur_dir;                /** working directory */
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -197,6 +199,7 @@ void append_lock_list (struct lock *);  /** Append the lock to lock_list */
 void remove_lock_list (struct lock *);  /** Remove the lock to lock_list */
 
 struct thread * get_thread (tid_t tid); /** Get thread entry from tid */
+void thread_set_root_dir (void);        /** set working dir of kernel to root */
 
 /** Reset the priority of a lock holder from the donation priority, the max
     priority of the threads waiting for the lock.*/

@@ -132,6 +132,7 @@ main (void)
   cache_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
+  thread_set_root_dir ();
 #endif
 
 #ifdef VM

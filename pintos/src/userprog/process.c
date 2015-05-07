@@ -126,6 +126,12 @@ start_process (void *command_line_)
        token = strtok_r (NULL, delimiters, &save_ptr))
     argv[i++] = token;
 
+  parent = get_thread (cur->parent_id);
+  if (parent != NULL) {
+    // inherit parent's cur_dir
+    cur->cur_dir = dir_reopen (parent->cur_dir);
+  }
+
   success = load (argv[0], &if_.eip, &if_.esp);
 
   /** Pass the argument to the top of user address space */

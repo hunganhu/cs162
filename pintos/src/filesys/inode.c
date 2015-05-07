@@ -7,7 +7,9 @@
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
 #include "filesys/cache.h"
+#include "filesys/directory.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 
 /* Identifies an inode. */
 /** ASCII value of 'INODE' */
@@ -47,6 +49,7 @@ struct inode
     int open_cnt;                       /* Number of openers. */
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
+    struct lock lock_inode;             /* lock hold when modify */
     struct inode_disk data;             /* Inode content. */
   };
 
@@ -293,8 +296,10 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  lock_init (&inode->lock_inode);
   //block_read (fs_device, inode->sector, &inode->data);
   cache_block_read (fs_device, inode->sector, &inode->data);
+  IDEBUG ("inode open: %p(%d),sector=%d.\n", inode, inode->open_cnt, inode->sector);
   return inode;
 }
 
@@ -304,6 +309,68 @@ inode_reopen (struct inode *inode)
 {
   if (inode != NULL)
     inode->open_cnt++;
+  IDEBUG ("inode reopen: %p(%d),sector=%d.\n", inode, inode->open_cnt, inode->sector);
+  return inode;
+}
+/* Return inode for a path. Return NULL if path_name is invalid.
+   Copy the last token not ended with '/' to file_name.
+*/
+struct inode *
+inode_open_path (const char *path_name, char *file_name)
+{
+  char *save_ptr, *token;  // declare variables for strtok_r()
+  char *delimiters = "/\\";
+  char *path = malloc (strlen(path_name) + 1); //length include '\0'
+  struct inode *inode = NULL;
+  struct dir *working_dir;
+  bool error = false;
+  struct thread *t = thread_current ();
+
+  *file_name = '\0';      // initial an empty filename
+  if (*path_name =='\0')  // empty string
+    return inode;
+
+  if (!strcmp (path_name, "/")) { // root directory need special handling 
+    strlcpy (file_name, "/", 2);
+    inode = inode_open (ROOT_DIR_SECTOR);
+    return inode;
+  }
+
+  strlcpy (path, path_name, strlen(path_name) + 1);
+  if (*path == '/')
+    working_dir = dir_open_root ();
+  else {
+    working_dir = dir_reopen (t->cur_dir);
+  }
+
+  for (token = strtok_r (path, delimiters, &save_ptr);
+       token != NULL;
+       token = strtok_r (NULL, delimiters, &save_ptr)) {
+
+    if (*save_ptr == '\0') { // token is the last one
+      strlcpy (file_name, token, strlen(token) + 1);
+    } else { // there are tokens left
+      //check token is in working_dir
+      if (!dir_lookup (working_dir, token, &inode)) {
+	error = true;
+	break;
+      } else {
+	if (inode_is_dir (inode)) {  // inode must be a directory
+	  dir_close (working_dir);
+	  working_dir = dir_open (inode);
+	}
+	else { //inode is not directory
+	  error = true;
+	  break;
+	}
+      }
+    } 
+  }
+  if (!error)
+    dir_lookup (working_dir, ".", &inode);  //get inode of working directory
+
+  dir_close (working_dir);
+  free (path);
   return inode;
 }
 
@@ -327,6 +394,7 @@ inode_close (struct inode *inode)
   // write all dirty pages to disk
   inode_flush (inode);
   /* Release resources if this was the last opener. */
+  IDEBUG ("inode before close: %p(%d),sector=%d.\n", inode, inode->open_cnt, inode->sector);
   if (--inode->open_cnt == 0)
     {
       /* Remove from inode list and release lock. */
@@ -482,18 +550,24 @@ inode_expand_zero (struct inode *inode, off_t size, off_t offset)
 {
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
+  block_sector_t sector_idx;
+  block_sector_t pos_sector;
 
   if (inode->deny_write_cnt)
     return 0;
 
+  inode->data.length = offset + size;
+  cache_block_write (fs_device, inode->sector, &inode->data);
+
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
-      block_sector_t sector_idx = byte_to_sector (inode, offset);
+      sector_idx = byte_to_sector (inode, offset);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
       if (sector_idx == BLOCK_ERROR) {
+	pos_sector = offset /  BLOCK_SECTOR_SIZE;
 	// mark the sector with zero sector
-	if (inode_expand_sector (inode, offset))
+	if (inode_expand_sector (inode, pos_sector))
 	  sector_idx = 0;
 	else
 	  break;
@@ -562,23 +636,37 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
   off_t inode_size = inode_length (inode);
+  block_sector_t sector_idx;
+  block_sector_t pos_sector;
 
-  if (offset > inode_size) {
-    inode_expand_zero (inode, offset + size - inode_size, inode_size);
-  }
   if (inode->deny_write_cnt)
     return 0;
 
+  if (offset > inode_size) {
+    inode_lock (inode);
+    inode_expand_zero (inode, offset + size - inode_size, inode_size);
+    inode_unlock (inode);
+  }
+
+  if ((offset + size) > inode_length (inode)) {
+    inode_lock (inode);
+    inode->data.length = offset + size;
+    cache_block_write (fs_device, inode->sector, &inode->data);
+    inode_unlock (inode);
+  }
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
-      block_sector_t sector_idx = byte_to_sector (inode, offset);
+      sector_idx = byte_to_sector (inode, offset);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
       if (sector_idx == BLOCK_ERROR) {
-	if (inode_expand_sector (inode, offset))
+	pos_sector = offset / BLOCK_SECTOR_SIZE;
+	if (inode_expand_sector (inode, pos_sector))
 	  sector_idx = byte_to_sector (inode, offset);
 	else
 	  break;
+	//re-read the inode_disk
+	cache_block_read (fs_device, inode->sector, &inode->data);
       }
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -626,6 +714,11 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       offset += chunk_size;
       bytes_written += chunk_size;
     }
+  // set the length of inode to new offset
+  inode_lock (inode);
+  //  inode->data.length = offset;
+  cache_block_write (fs_device, inode->sector, &inode->data);
+  inode_unlock (inode);
   free (bounce);
 
   return bytes_written;
@@ -658,6 +751,18 @@ inode_length (const struct inode *inode)
   return inode->data.length;
 }
 
+/* Returns the open count of INODE. */
+int
+inode_open_cnt (const struct inode *inode)
+{
+  return inode->open_cnt;
+}
+
+/* Returns true if inode is a directory */
+bool inode_is_dir (const struct inode *inode)
+{
+  return inode != NULL && inode->data.is_dir != 0 ? true : false;
+}
 /* flush all dirty sectors of the inode to disk */
 void
 inode_flush (struct inode *inode) 
@@ -690,4 +795,69 @@ inode_flush (struct inode *inode)
       }
     }
   } 
+}
+
+void inode_lock (struct inode *inode)
+{
+  lock_acquire (&inode->lock_inode);
+}
+void inode_unlock (struct inode *inode)
+{
+  lock_release (&inode->lock_inode);
+}
+
+/* Devide the given NAME into two parts, the path and the last part, either 
+   a file or a directory. The PATH and LAST should have enough space to held
+   the return values. 
+*/
+bool
+path_parse (const char *name, char *path, char *last)
+{
+  char *save_ptr, *token, **tokenv;  // declare variables for strtok_r()
+  char *delimiters = "/\\";
+  int tokenc, i;
+  char *name_str = malloc (strlen(name) + 1); //length include '\0'
+  bool success = false;
+
+ /** get the number of tokens*/
+  strlcpy (name_str, name, strlen(name) + 1);
+  for (token = strtok_r (name_str, delimiters, &save_ptr), tokenc = 0;
+       token != NULL;
+       token = strtok_r (NULL, delimiters, &save_ptr))
+    tokenc++;
+
+  if (tokenc == 0)
+    return success;
+
+  /** get the tokens */
+  tokenv = malloc (tokenc * sizeof (char *));
+  strlcpy (name_str, name, strlen(name) + 1);
+  for (token = strtok_r (name_str, delimiters, &save_ptr), i = 0;
+       token != NULL;
+       token = strtok_r (NULL, delimiters, &save_ptr))
+    tokenv[i++] = token;
+
+  if (path != NULL && last != NULL) {
+    if (*name == '/')
+      strlcpy (path, "/", 1);
+    else
+      *path = '\0';
+
+    if (tokenc < 2) {
+      strlcpy (last, tokenv[tokenc - 1], strlen (tokenv[tokenc - 1]) + 1);
+    } else {
+      strlcpy (last, tokenv[tokenc - 1], strlen (tokenv[tokenc - 1]) + 1);
+      strlcat (path, tokenv[0], strlen (tokenv[0]));
+      for (i == 1; i < tokenc - 1; i++) {
+	strlcat (path, "/", 1);
+	strlcat (path, tokenv[i], strlen (tokenv[i]));
+      }
+    }
+    success = true;
+  }
+  
+  free (name_str);
+  free (tokenv);
+  return success;
+
 }

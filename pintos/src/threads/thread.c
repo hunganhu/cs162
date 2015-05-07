@@ -673,6 +673,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->magic = THREAD_MAGIC;
+  t->cur_dir = NULL;         // set working directory
   /** for donate priority */
   t->priority = priority;
   t->priority_old = priority;
@@ -936,6 +937,13 @@ struct thread * get_thread (tid_t tid)
   }
   return NULL;
 }
+
+void thread_set_root_dir (void)
+{
+  struct thread *cur = running_thread ();
+  cur->cur_dir = dir_open_root ();
+}
+
 #ifdef USERPROG
 void init_process(struct thread *t)
 {
