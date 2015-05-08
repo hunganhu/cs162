@@ -337,7 +337,10 @@ static int sys_open (const char *file)
   int fd = -1;
 
   if (file_ != NULL) {
-    fd = t->next_fd++;
+    //get the next available fd, circle back when reach FD_MAX
+    while (t->fd_table[t->next_fd] != NULL)
+      t->next_fd = (t->next_fd + 1) % FD_MAX;
+    fd = t->next_fd;
     t->fd_table[fd] = file_;
   }
   return fd;

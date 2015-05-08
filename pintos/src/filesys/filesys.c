@@ -56,9 +56,10 @@ filesys_create (const char *name, off_t initial_size)
   bool success = false;
 
   inode = inode_open_path (name, file_name);
-  if (inode == NULL && *file_name == '\0')
+  if (inode == NULL && *file_name == '\0') {
+    free (file_name);
     return success;
-
+  }
   struct dir *dir = dir_open (inode);
   success = (dir != NULL
 	     && free_map_allocate (1, &inode_sector)
