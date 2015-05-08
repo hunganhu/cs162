@@ -44,11 +44,8 @@ file_close (struct file *file)
   if (file != NULL)
     {
       file_allow_write (file);
-      if (inode_is_dir (file->inode))
-	dir_close (file->dir);
-      else
-	inode_close (file->inode);
-
+      free (file->dir);
+      inode_close (file->inode);
       free (file); 
     }
 }

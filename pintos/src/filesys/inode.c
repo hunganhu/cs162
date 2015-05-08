@@ -331,7 +331,7 @@ inode_open_path (const char *path_name, char *file_name)
     return inode;
 
   if (!strcmp (path_name, "/")) { // root directory need special handling 
-    strlcpy (file_name, "/", 2);
+    *file_name = '\0';
     inode = inode_open (ROOT_DIR_SECTOR);
     return inode;
   }
@@ -402,14 +402,8 @@ inode_close (struct inode *inode)
 
       /* Deallocate blocks if removed. */
       if (inode->removed) 
-        {
-	  inode_release (inode);
-          //free_map_release (inode->sector, 1);
-	  /*
-          free_map_release (inode->data.start,
-                            bytes_to_sectors (inode->data.length)); 
-	  */
-        }
+	inode_release (inode);
+
       free (inode); 
     }
 }

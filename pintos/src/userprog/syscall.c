@@ -289,13 +289,13 @@ static bool sys_create (const char *file, unsigned initial_size)
 
   bool success = false;
   struct file *file_ptr;
-  // the name of file cannot be empty and cannot be existed
   lock_filesys();
   file_ptr = filesys_open (file);
   if (file_ptr == NULL)
     success = filesys_create (file, initial_size);
   else
     file_close (file_ptr);
+
   unlock_filesys();
   return success;
 }
@@ -307,8 +307,16 @@ static bool sys_remove (const char *file)
     sys_exit(-1);
 
   bool success = false;
+  //  struct file *file_ptr;
+  //  file_ptr = filesys_open (file);
   lock_filesys();
   success = filesys_remove (file);
+
+  /*  if (file_ptr != NULL) {
+    file_close (file_ptr);
+    success = filesys_remove (file);
+  }
+  */
   unlock_filesys();
   return success;
 
@@ -547,9 +555,8 @@ static mapid_t sys_mmap (int fd, void *buffer)
   uint32_t read_bytes;        /*mmap file size*/
   uint8_t *upage = buffer;    /* user virtual page start address*/
 
-  // check file existence
-  //  file = file_reopen(t->fd_table[fd]);
-  file = t->fd_table[fd];
+  // check file existence, create another file structure
+  file = file_reopen(t->fd_table[fd]);
   if (file == NULL)
     return MAP_FAILED;
 
@@ -640,10 +647,14 @@ static bool sys_chdir (const char *dir)
   struct dir *working_dir;
   bool success = false;
 
-  if (inode_path != NULL && *file_name !='\0') {
-    working_dir = dir_open (inode_path);
-    dir_lookup (working_dir, file_name, &inode);
-    dir_close (working_dir);
+  if (inode_path != NULL) {
+    if (*file_name !='\0') {
+      working_dir = dir_open (inode_path);
+      dir_lookup (working_dir, file_name, &inode);
+      dir_close (working_dir);
+    } else {
+      inode = inode_path;
+    }
   }
 
   if (inode != NULL) {

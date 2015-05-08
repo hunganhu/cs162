@@ -39,8 +39,7 @@ dir_create (block_sector_t sector, size_t entry_cnt)
   if (sector == ROOT_DIR_SECTOR) {
     struct dir *working_dir = dir_open (inode_open (sector));
     if (dir_add (working_dir, ".",  ROOT_DIR_SECTOR) &&
-	dir_add (working_dir, "..", ROOT_DIR_SECTOR) &&
-	dir_add (working_dir, "/",  ROOT_DIR_SECTOR))
+	dir_add (working_dir, "..", ROOT_DIR_SECTOR))
       success = true;
     dir_close (working_dir);
   } else {
@@ -232,7 +231,7 @@ dir_remove (struct dir *dir, const char *name)
     goto done;
   
   /* inode's open count > 0, cannot remove */
-  if (inode_open_cnt (inode) > 1)
+  if (inode_is_dir (inode) && inode_open_cnt (inode) > 1)
     goto done;
 
   /* Erase directory entry. */
