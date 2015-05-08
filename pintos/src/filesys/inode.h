@@ -45,6 +45,5 @@ void inode_release (struct inode *inode);
 struct inode *inode_open_path (const char *path_name, char *file_name);
 void inode_lock (struct inode *inode);
 void inode_unlock (struct inode *inode);
-bool path_parse (const char *name, char *path, char *last);
 
 #endif /* filesys/inode.h */

@@ -307,16 +307,9 @@ static bool sys_remove (const char *file)
     sys_exit(-1);
 
   bool success = false;
-  //  struct file *file_ptr;
-  //  file_ptr = filesys_open (file);
+
   lock_filesys();
   success = filesys_remove (file);
-
-  /*  if (file_ptr != NULL) {
-    file_close (file_ptr);
-    success = filesys_remove (file);
-  }
-  */
   unlock_filesys();
   return success;
 
@@ -400,8 +393,6 @@ static int sys_read (int fd, void *buffer, unsigned size)
     uint32_t bytes_to_read;
     void *upage;
 
-    //    if (file_ != NULL)
-    //      byte_read = file_read (file_, buffer, size);
     if (file_ != NULL) {
       upage = pg_round_down(buffer);
       byte_read = 0;
@@ -629,8 +620,6 @@ static void sys_munmap (mapid_t mapid)
 
   if (mmap != NULL) {
     page_munmap (mmap);
-    /*close file*/
-    // file_close(mmap->file);
     /*free thread's mmap_list*/
     list_remove (&mmap->map_elem);
     free (mmap);

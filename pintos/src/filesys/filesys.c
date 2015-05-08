@@ -60,6 +60,7 @@ filesys_create (const char *name, off_t initial_size)
     free (file_name);
     return success;
   }
+
   struct dir *dir = dir_open (inode);
   success = (dir != NULL
 	     && free_map_allocate (1, &inode_sector)
@@ -120,9 +121,7 @@ filesys_open (const char *name)
   char *file_name = malloc (strlen (name) + 1);
   struct inode *inode_path = inode_open_path (name, file_name);
   struct dir *working_dir;
-  struct dir *parent_dir;
   struct inode *inode = NULL;
-  struct inode *inode_parent = NULL;
   struct file *file_ptr = NULL;
 
   if (inode_path != NULL) {

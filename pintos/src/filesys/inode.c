@@ -19,7 +19,6 @@
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
-    //block_sector_t start;   /* First data sector. */
     off_t length;             /* File size in bytes. */
     unsigned magic;           /* Magic number. */
     unsigned is_dir;          /* is the inode a directory 0:false, others:true*/
@@ -70,7 +69,6 @@ byte_to_sector (const struct inode *inode, off_t pos)
   block_sector_t pos_sector = pos / BLOCK_SECTOR_SIZE;
   inode_block = calloc (1, sizeof (*inode_block));
   cache_block_read (fs_device, inode->sector, inode_block);
-  //inode_block = &inode->data;
   
   if (pos_sector < INDIRECT_BEGIN) {
     sector = inode_block->block[pos_sector];
@@ -137,7 +135,6 @@ bool inode_expand_sector (struct inode *inode, block_sector_t pos_sector)
   block_sector_t indirect_idx, dbl_indirect_idx, i;
   bool success = false;
 
-  //  block_sector_t pos_sector = pos / BLOCK_SECTOR_SIZE;
   inode_block = &inode->data;
   
   if (pos_sector < INDIRECT_BEGIN) {
@@ -297,9 +294,9 @@ inode_open (block_sector_t sector)
   inode->deny_write_cnt = 0;
   inode->removed = false;
   lock_init (&inode->lock_inode);
-  //block_read (fs_device, inode->sector, &inode->data);
+
   cache_block_read (fs_device, inode->sector, &inode->data);
-  IDEBUG ("inode open: %p(%d),sector=%d.\n", inode, inode->open_cnt, inode->sector);
+  IDEBUG("inode open:%p(%d),sector=%d.\n",inode,inode->open_cnt,inode->sector);
   return inode;
 }
 
@@ -508,7 +505,6 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Read full sector directly into caller's buffer. */
-          //block_read (fs_device, sector_idx, buffer + bytes_read);
           cache_block_read (fs_device, sector_idx, buffer + bytes_read);
         }
       else 
@@ -521,7 +517,6 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
               if (bounce == NULL)
                 break;
             }
-          //block_read (fs_device, sector_idx, bounce);
           cache_block_read (fs_device, sector_idx, bounce);
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
         }
@@ -676,7 +671,6 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Write full sector directly to disk. */
-          //block_write (fs_device, sector_idx, buffer + bytes_written);
           cache_block_write (fs_device, sector_idx, buffer + bytes_written);
         }
       else 
@@ -693,13 +687,11 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
              we're writing, then we need to read in the sector
              first.  Otherwise we start with a sector of all zeros. */
           if (sector_ofs > 0 || chunk_size < sector_left) { 
-            //block_read (fs_device, sector_idx, bounce);
             cache_block_read (fs_device, sector_idx, bounce);
 	  }
           else
             memset (bounce, 0, BLOCK_SECTOR_SIZE);
           memcpy (bounce + sector_ofs, buffer + bytes_written, chunk_size);
-          //block_write (fs_device, sector_idx, bounce);
           cache_block_write (fs_device, sector_idx, bounce);
         }
 
@@ -710,7 +702,6 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     }
   // set the length of inode to new offset
   inode_lock (inode);
-  //  inode->data.length = offset;
   cache_block_write (fs_device, inode->sector, &inode->data);
   inode_unlock (inode);
   free (bounce);
@@ -800,58 +791,3 @@ void inode_unlock (struct inode *inode)
   lock_release (&inode->lock_inode);
 }
 
-/* Devide the given NAME into two parts, the path and the last part, either 
-   a file or a directory. The PATH and LAST should have enough space to held
-   the return values. 
-*/
-bool
-path_parse (const char *name, char *path, char *last)
-{
-  char *save_ptr, *token, **tokenv;  // declare variables for strtok_r()
-  char *delimiters = "/\\";
-  int tokenc, i;
-  char *name_str = malloc (strlen(name) + 1); //length include '\0'
-  bool success = false;
-
- /** get the number of tokens*/
-  strlcpy (name_str, name, strlen(name) + 1);
-  for (token = strtok_r (name_str, delimiters, &save_ptr), tokenc = 0;
-       token != NULL;
-       token = strtok_r (NULL, delimiters, &save_ptr))
-    tokenc++;
-
-  if (tokenc == 0)
-    return success;
-
-  /** get the tokens */
-  tokenv = malloc (tokenc * sizeof (char *));
-  strlcpy (name_str, name, strlen(name) + 1);
-  for (token = strtok_r (name_str, delimiters, &save_ptr), i = 0;
-       token != NULL;
-       token = strtok_r (NULL, delimiters, &save_ptr))
-    tokenv[i++] = token;
-
-  if (path != NULL && last != NULL) {
-    if (*name == '/')
-      strlcpy (path, "/", 1);
-    else
-      *path = '\0';
-
-    if (tokenc < 2) {
-      strlcpy (last, tokenv[tokenc - 1], strlen (tokenv[tokenc - 1]) + 1);
-    } else {
-      strlcpy (last, tokenv[tokenc - 1], strlen (tokenv[tokenc - 1]) + 1);
-      strlcat (path, tokenv[0], strlen (tokenv[0]));
-      for (i == 1; i < tokenc - 1; i++) {
-	strlcat (path, "/", 1);
-	strlcat (path, tokenv[i], strlen (tokenv[i]));
-      }
-    }
-    success = true;
-  }
-  
-  free (name_str);
-  free (tokenv);
-  return success;
-
-}

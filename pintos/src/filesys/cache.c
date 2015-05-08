@@ -359,4 +359,3 @@ release_exclusive (struct shared_lock *s)
   cond_broadcast (&s->cond, &s->lock);
   lock_release (&s->lock);
 }
-
